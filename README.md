@@ -27,12 +27,14 @@ A self-hosted analytics dashboard for **Holmenkollstafetten** — Oslo's 18.5 km
 
 ```bash
 git clone https://github.com/bendiknordeng/holmenkollstafetten.git
-cd holmenkollstafetten/web
+cd holmenkollstafetten/docs
 python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
 Static files only — no build step, no backend, no install. The dataset is pre-baked as JSON.
+
+Live: **[bendiknordeng.github.io/holmenkollstafetten](https://bendiknordeng.github.io/holmenkollstafetten/)**
 
 ## Features
 
@@ -67,7 +69,7 @@ Static files only — no build step, no backend, no install. The dataset is pre-
 ## Layout
 
 ```
-web/
+docs/
 ├── index.html        # importmap + root mount
 ├── app.js            # ~2500 LOC, single-file React app
 ├── app.css
