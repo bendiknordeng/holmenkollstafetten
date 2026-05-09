@@ -5,24 +5,23 @@
 
 A self-hosted analytics dashboard for **Holmenkollstafetten** — Oslo's 18.5 km, 15-leg relay across the city — covering 2019, 2022–2026.
 
-```
-                                                                       ╱ Besserud
-                                          Slemdal                    ╱
-                                         ╱─── 7. brattest opp ────╲ ╱
-                              Vinderen ╱                          ╲
-                       Forskningsv. ╱                              ╲ Gressbanen
-              Wilh. Færden ╱                                        ╲
-        Wolffs ╱                                                     ╲ Holmen
-   Louises ╱                                                          ╲
-Knud K. ╱                                                              ╲
- START                                                                  ╲ Frognerparken
-                                                                         ╲
-                                                                          ╲ Nordraaks
-                                                                  Bislett ╱
-                                                       Camilla C. ╱
-                                                     Arno Bergs ╱
-                                                          Dumpa
-```
+| #  | Leg                                  | Distance | Profile          |
+|---:|--------------------------------------|---------:|------------------|
+| 1  | Knud Knudsens plass → Louises gate   | 1 100 m  | Climb            |
+| 2  | Louises gate → Wolffs gate           | 1 070 m  | Rolling          |
+| 3  | Wolffs gate → Wilh. Færdens vei      |   595 m  | Flat             |
+| 4  | Wilh. Færdens vei → Forskningsv.     | 1 920 m  | Rolling          |
+| 5  | Forskningsv. → Vinderen / Holmenv.   | 1 210 m  | Climb            |
+| 6  | Holmenveien → Slemdal skole          | 1 250 m  | Climb            |
+| 7  | Slemdal → Besserud                   | 1 770 m  | Steepest climb   |
+| 8  | Besserud → Gressbanen                | 1 780 m  | Descent          |
+| 9  | Gressbanen → Holmendammen            |   625 m  | Flat             |
+| 10 | Holmendammen → Frognerparken         | 2 860 m  | Long descent     |
+| 11 | Frognerparken → Nordraaks gate       | 1 520 m  | Rolling          |
+| 12 | Nordraaks gate → Arno Bergs plass    |   350 m  | Sprint           |
+| 13 | Arno Bergs plass → Camilla Colletts  | 1 080 m  | Climb            |
+| 14 | Camilla Colletts vei → Bislettgata   |   710 m  | Flat             |
+| 15 | Bislettgata → Bislett                |   535 m  | Final            |
 
 ## Run it
 
