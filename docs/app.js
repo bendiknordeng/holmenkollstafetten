@@ -322,7 +322,7 @@ function Topbar({ view, setView, n, compareCount, hasSidebar, sidebarOpen, setSi
           </svg>
         </button>
       ` : null}
-      <h1>Holmenkoll<em>stafetten</em> DB <span className="small">${n.toLocaleString("no")} lag · 2019–2026</span></h1>
+      <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2019–2026</span></h1>
       <div className="spacer"></div>
       ${compareCount > 0
         ? html`
