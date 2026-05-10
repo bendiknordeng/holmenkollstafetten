@@ -1749,6 +1749,7 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
   const [yearSel, setYearSel] = useState([]);
   const [klasseSel, setKlasseSel] = useState([]);
   const compareSet = useMemo(() => new Set(compareTids), [compareTids]);
+  const isMobile = useIsMobile();
 
   // Match returns flat list of tids first, then we group by normalized name.
   const { flatTids, groups } = useMemo(() => {
@@ -1815,10 +1816,10 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
   };
 
   return html`
-    <div style=${{ position: "relative" }}>
+    <div style=${{ position: "relative", width: isMobile ? "100%" : "auto", flex: isMobile ? "1 1 100%" : undefined, minWidth: 0 }}>
       <input
         type="text"
-        placeholder="Søk og legg til (Enter = legg til alle treff)…"
+        placeholder=${isMobile ? "Søk og legg til…" : "Søk og legg til (Enter = legg til alle treff)…"}
         value=${q}
         onInput=${(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus=${() => setOpen(true)}
@@ -1831,22 +1832,24 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
             setOpen(false);
           }
         }}
-        style=${{ width: "360px" }}
+        style=${{ width: isMobile ? "100%" : "360px", boxSizing: "border-box" }}
       />
       ${open && (flatTids.length > 0 || q.length >= 2 || yearSel.length || klasseSel.length)
         ? html`
             <div style=${{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              width: "min(720px, calc(100vw - 60px))",
-              maxHeight: "520px",
+              position: isMobile ? "fixed" : "absolute",
+              top: isMobile ? "auto" : "calc(100% + 4px)",
+              bottom: isMobile ? "0" : "auto",
+              left: isMobile ? "0" : "auto",
+              right: isMobile ? "0" : 0,
+              width: isMobile ? "100vw" : "min(720px, calc(100vw - 60px))",
+              maxHeight: isMobile ? "70vh" : "520px",
               overflow: "auto",
               background: "var(--panel)",
               border: "1px solid var(--border-strong)",
-              borderRadius: "4px",
+              borderRadius: isMobile ? "12px 12px 0 0" : "4px",
               boxShadow: "var(--shadow)",
-              zIndex: 10,
+              zIndex: 60,
             }}>
               <div style=${{ padding: "8px 12px", borderBottom: "1px solid var(--border-strong)", background: "var(--bg-2)", display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
@@ -1889,14 +1892,14 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
                           borderBottom: "1px solid var(--border)",
                           cursor: "pointer",
                           display: "grid",
-                          gridTemplateColumns: "1fr auto 30px",
+                          gridTemplateColumns: isMobile ? "1fr 30px" : "1fr auto 30px",
                           gap: "10px",
                           alignItems: "center",
                           fontSize: "13px",
                           background: allInComp ? "rgba(108,194,112,0.10)" : someInComp ? "rgba(244,207,58,0.06)" : "transparent",
                         }}
                       >
-                        <div style=${{ display: "flex", flexDirection: "column", gap: "2px", overflow: "hidden" }}>
+                        <div style=${{ display: "flex", flexDirection: "column", gap: "4px", overflow: "hidden", minWidth: 0 }}>
                           <span style=${{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${g.name}</span>
                           <span style=${{ color: "var(--muted)", fontSize: "11px", fontFamily: "JetBrains Mono, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             ${g.tids.map((tid) => {
@@ -1907,27 +1910,51 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
                               return matchedRunner ? `${t[1]}: ${matchedRunner[4]} (e${matchedRunner[1]})` : `${t[1]} · ${meta.klasser[t[5]] || ""}`;
                             }).join(" · ")}
                           </span>
+                          ${isMobile ? html`
+                            <div className="chips" style=${{ flexWrap: "wrap", marginTop: "2px" }}>
+                              ${g.tids.slice(0, 6).map((tid) => {
+                                const t = teams[tid];
+                                const isC = compareSet.has(tid);
+                                return html`
+                                  <span
+                                    key=${tid}
+                                    className=${"chip year-" + t[1]}
+                                    onMouseDown=${(e) => { e.preventDefault(); e.stopPropagation(); toggleCompare(tid); }}
+                                    style=${{ cursor: "pointer", opacity: isC ? 1 : 0.55, fontWeight: isC ? 700 : 400 }}
+                                    title=${`${t[3]} (${t[1]}) — ${fmtTime(t[6])}`}
+                                  >
+                                    ${t[1]}${isC ? " ✓" : ""}
+                                  </span>
+                                `;
+                              })}
+                              ${g.tids.length > 6
+                                ? html`<span className="chip" style=${{ color: "var(--muted)" }}>+${g.tids.length - 6}</span>`
+                                : null}
+                            </div>
+                          ` : null}
                         </div>
-                        <div className="chips" style=${{ maxWidth: "240px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          ${g.tids.slice(0, 6).map((tid) => {
-                            const t = teams[tid];
-                            const isC = compareSet.has(tid);
-                            return html`
-                              <span
-                                key=${tid}
-                                className=${"chip year-" + t[1]}
-                                onMouseDown=${(e) => { e.preventDefault(); e.stopPropagation(); toggleCompare(tid); }}
-                                style=${{ cursor: "pointer", opacity: isC ? 1 : 0.55, fontWeight: isC ? 700 : 400 }}
-                                title=${`${t[3]} (${t[1]}) — ${fmtTime(t[6])}`}
-                              >
-                                ${t[1]}${isC ? " ✓" : ""}
-                              </span>
-                            `;
-                          })}
-                          ${g.tids.length > 6
-                            ? html`<span className="chip" style=${{ color: "var(--muted)" }}>+${g.tids.length - 6}</span>`
-                            : null}
-                        </div>
+                        ${!isMobile ? html`
+                          <div className="chips" style=${{ maxWidth: "240px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            ${g.tids.slice(0, 6).map((tid) => {
+                              const t = teams[tid];
+                              const isC = compareSet.has(tid);
+                              return html`
+                                <span
+                                  key=${tid}
+                                  className=${"chip year-" + t[1]}
+                                  onMouseDown=${(e) => { e.preventDefault(); e.stopPropagation(); toggleCompare(tid); }}
+                                  style=${{ cursor: "pointer", opacity: isC ? 1 : 0.55, fontWeight: isC ? 700 : 400 }}
+                                  title=${`${t[3]} (${t[1]}) — ${fmtTime(t[6])}`}
+                                >
+                                  ${t[1]}${isC ? " ✓" : ""}
+                                </span>
+                              `;
+                            })}
+                            ${g.tids.length > 6
+                              ? html`<span className="chip" style=${{ color: "var(--muted)" }}>+${g.tids.length - 6}</span>`
+                              : null}
+                          </div>
+                        ` : null}
                         <span className=${"compare-toggle" + (allInComp ? " on" : "")}>${allInComp ? "✓" : "+"}</span>
                       </div>
                     `;
@@ -2239,7 +2266,7 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
           <div className="kicker">Sammenligning · ${items.length} lag</div>
           <h2>Side mot <em>side</em></h2>
         </div>
-        <div style=${{ display: "flex", gap: "12px", alignItems: "center" }}>
+        <div style=${{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
           <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
           <button className="subtle danger" onClick=${clearCompare}>Tøm alle</button>
         </div>
