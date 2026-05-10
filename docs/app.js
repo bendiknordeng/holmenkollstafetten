@@ -2254,6 +2254,7 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
   const { meta, etappeRoutes, etappeElevation } = db;
   const coords = meta.etappe_coords || [];
   const [activeEt, setActiveEt] = useState(null);
+  const isMobile = useIsMobile();
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const segLayerRef = useRef(null);
@@ -2387,6 +2388,100 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
     };
   }, [activeEt, meta.years, db.statsOverall, statsAllYears]);
 
+  const detailsPanel = activeEt != null && stats
+    ? html`
+        <div className=${"map-detail" + (isMobile ? " mobile" : "")}>
+          <div className="md-head">
+            <div className="md-title">
+              <div className="kicker">Etappe ${activeEt} · ${ETAPPE_NAMES[activeEt] || ""}</div>
+              <h2>
+                ${isMobile
+                  ? html`<span>${coords[activeEt - 1]?.navn} → ${coords[activeEt]?.navn}</span>`
+                  : html`${meta.etappe_distances[activeEt]} m <em>raskeste tider</em>`}
+              </h2>
+              ${isMobile
+                ? html`<div className="md-sub">${meta.etappe_distances[activeEt]} m · raskeste tider</div>`
+                : null}
+            </div>
+            ${!isMobile
+              ? html`
+                  <button
+                    className="primary"
+                    onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
+                  >
+                    Vis alle løp på etappe ${activeEt} →
+                  </button>
+                `
+              : null}
+          </div>
+          ${etappeElevation?.[String(activeEt)]
+            ? html`<${ElevationProfile} profile=${etappeElevation[String(activeEt)]} />`
+            : null}
+          ${stats.allTime
+            ? html`
+                <div className="md-record">
+                  <div className="lbl">Rekord</div>
+                  <div className="time">${fmtTime(stats.allTime.min)}</div>
+                  <div className="meta">
+                    <div>Median ${fmtTime(stats.allTime.median)}</div>
+                    <div>${stats.allTime.n.toLocaleString("no")} løp</div>
+                  </div>
+                </div>
+              `
+            : null}
+          <div className="md-years">
+            ${stats.perYear.map((s) => {
+              const recordDelta = stats.allTime ? s.min - stats.allTime.min : 0;
+              const isRecordYear = stats.allTime && s.min === stats.allTime.min;
+              return html`
+                <div className="md-year-card" key=${s.y} style=${{ borderLeftColor: `var(--c-${s.y})` }}>
+                  <div className="yr-head">
+                    <span className="yr" style=${{ color: `var(--c-${s.y})` }}>${s.y}</span>
+                    ${isRecordYear ? html`<span className="yr-rekord">Rekord</span>` : null}
+                  </div>
+                  <div className="yr-time">${fmtTime(s.min)}</div>
+                  <div className="yr-delta">${recordDelta > 0 ? `+${fmtTime(recordDelta)}` : "—"} vs rekord</div>
+                  <div className="yr-foot">median ${fmtTime(s.median)} · ${s.n} løp</div>
+                </div>
+              `;
+            })}
+          </div>
+          ${isMobile
+            ? html`
+                <button
+                  className="primary md-cta"
+                  onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
+                >
+                  Vis alle løp på etappe ${activeEt} →
+                </button>
+              `
+            : null}
+        </div>
+      `
+    : null;
+
+  if (isMobile) {
+    return html`
+      <div className="map-view mobile">
+        <div className="map-stage-strip">
+          <button
+            className=${activeEt == null ? "active" : ""}
+            onClick=${() => setActiveEt(null)}
+          >Alle</button>
+          ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((e) => html`
+            <button
+              key=${e}
+              className=${activeEt === e ? "active" : ""}
+              onClick=${() => setActiveEt(e)}
+            >${e}</button>
+          `)}
+        </div>
+        <div ref=${containerRef} className="map-canvas mobile"></div>
+        ${detailsPanel}
+      </div>
+    `;
+  }
+
   return html`
     <div className="map-view" style=${{ display: "flex", flexDirection: "row" }}>
       <div className="map-side">
@@ -2420,92 +2515,7 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       </div>
       <div style=${{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <div ref=${containerRef} className="map-canvas"></div>
-        ${activeEt != null && stats
-          ? html`
-              <div style=${{ padding: "20px 24px", borderTop: "1px solid var(--border)", background: "linear-gradient(to bottom, var(--bg-2), var(--bg))" }}>
-                <div style=${{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <div>
-                    <div className="kicker">Etappe ${activeEt} · ${ETAPPE_NAMES[activeEt] || ""}</div>
-                    <h2 style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "26px", margin: "4px 0 0", letterSpacing: "-0.01em" }}>
-                      ${meta.etappe_distances[activeEt]} m <em style=${{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>raskeste tider</em>
-                    </h2>
-                  </div>
-                  <button
-                    className="primary"
-                    onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
-                  >
-                    Vis alle løp på etappe ${activeEt} →
-                  </button>
-                </div>
-                ${etappeElevation?.[String(activeEt)]
-                  ? html`<${ElevationProfile} profile=${etappeElevation[String(activeEt)]} />`
-                  : null}
-                ${stats.allTime
-                  ? html`
-                      <div style=${{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
-                        <div style=${{
-                          display: "grid",
-                          gridTemplateColumns: "auto 1fr auto auto",
-                          gap: "16px",
-                          alignItems: "center",
-                          padding: "14px 18px",
-                          background: "var(--panel)",
-                          border: "1px solid var(--border-strong)",
-                          borderLeft: "4px solid var(--accent)",
-                          borderRadius: "5px",
-                        }}>
-                          <div style=${{ fontFamily: "Fraunces, serif", fontStyle: "italic", fontWeight: 700, fontSize: "13px", color: "var(--accent)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Rekord</div>
-                          <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "30px", letterSpacing: "-0.01em" }}>
-                            ${fmtTime(stats.allTime.min)}
-                          </div>
-                          <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", textAlign: "right" }}>
-                            <div>Median ${fmtTime(stats.allTime.median)}</div>
-                            <div style=${{ marginTop: "2px" }}>P10 / P90 spread</div>
-                          </div>
-                          <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", textAlign: "right" }}>
-                            ${stats.allTime.n.toLocaleString("no")} løp
-                          </div>
-                        </div>
-                      </div>
-                    `
-                  : null}
-                <div style=${{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${stats.perYear.length}, 1fr)`,
-                  gap: "8px",
-                }}>
-                  ${stats.perYear.map((s) => {
-                    const recordDelta = stats.allTime ? s.min - stats.allTime.min : 0;
-                    const isRecordYear = stats.allTime && s.min === stats.allTime.min;
-                    return html`
-                      <div key=${s.y} style=${{
-                        padding: "10px 14px",
-                        background: "var(--bg-2)",
-                        border: "1px solid var(--border)",
-                        borderLeft: `3px solid var(--c-${s.y})`,
-                        borderRadius: "4px",
-                        position: "relative",
-                      }}>
-                        <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                          <span style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "16px", color: `var(--c-${s.y})` }}>${s.y}</span>
-                          ${isRecordYear ? html`<span style=${{ fontSize: "9px", letterSpacing: "0.1em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>Rekord</span>` : null}
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "20px", fontWeight: 700, marginTop: "4px", lineHeight: 1 }}>
-                          ${fmtTime(s.min)}
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", color: "var(--muted)", marginTop: "6px" }}>
-                          ${recordDelta > 0 ? `+${fmtTime(recordDelta)}` : "—"} vs rekord
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", color: "var(--muted)", marginTop: "1px" }}>
-                          median ${fmtTime(s.median)} · ${s.n} løp
-                        </div>
-                      </div>
-                    `;
-                  })}
-                </div>
-              </div>
-            `
-          : null}
+        ${detailsPanel}
       </div>
     </div>
   `;
