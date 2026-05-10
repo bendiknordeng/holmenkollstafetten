@@ -1029,6 +1029,52 @@ input[type="checkbox"] { accent-color: var(--accent); }
   white-space: nowrap;
 }
 
+.elevation-profile {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 10px 12px 6px;
+  margin-bottom: 12px;
+}
+.elevation-profile .ep-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.elevation-profile .ep-kicker {
+  font-family: "Fraunces", serif;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.elevation-profile .ep-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+.elevation-profile .ep-stats .lbl {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9px;
+  margin-right: 4px;
+}
+.elevation-profile .ep-stats .val { font-weight: 700; }
+.elevation-profile .ep-stats .val.gain { color: var(--bad); }
+.elevation-profile .ep-stats .val.loss { color: var(--good); }
+@media (max-width: 820px) {
+  .elevation-profile { padding: 8px 10px 4px; }
+  .elevation-profile .ep-stats { gap: 10px; font-size: 10px; }
+}
+
 .etappe-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .etappe-card {
   border: 1px solid var(--border);

@@ -14,6 +14,8 @@ import {
   ReferenceLine,
   LineChart,
   Line,
+  AreaChart,
+  Area,
 } from "recharts";
 import htm from "htm";
 import L from "leaflet";
@@ -27,7 +29,7 @@ const TEAM_FIELDS = ["tid", "year", "bib", "team", "bedrift", "klasse_id", "tota
 // splits.json: array of [tid, etappe, split_sec, total_sec, runner]
 
 async function loadAll() {
-  const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes] = await Promise.all([
+  const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation] = await Promise.all([
     fetch("data/meta.json").then((r) => r.json()),
     fetch("data/teams.json").then((r) => r.json()),
     fetch("data/splits.json").then((r) => r.json()),
@@ -35,8 +37,9 @@ async function loadAll() {
     fetch("data/stats_overall.json").then((r) => r.json()),
     fetch("data/stats_klasse.json").then((r) => r.json()),
     fetch("data/etappe_routes.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    fetch("data/etappe_elevation.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
   ]);
-  return { meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes };
+  return { meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation };
 }
 
 // ---- Helpers --------------------------------------------------------------
@@ -2116,8 +2119,70 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
   `;
 }
 
+function ElevationProfile({ profile }) {
+  const data = useMemo(
+    () => profile.points.map(([d, e]) => ({ d, e })),
+    [profile],
+  );
+  return html`
+    <div className="elevation-profile">
+      <div className="ep-head">
+        <div className="ep-kicker">Høydeprofil</div>
+        <div className="ep-stats">
+          <span><span className="lbl">Stigning</span> <span className="val gain">+${Math.round(profile.gain)} m</span></span>
+          <span><span className="lbl">Fall</span> <span className="val loss">−${Math.round(profile.loss)} m</span></span>
+          <span><span className="lbl">Min/Maks</span> <span className="val">${Math.round(profile.min)}–${Math.round(profile.max)} m</span></span>
+        </div>
+      </div>
+      <${ResponsiveContainer} width="100%" height=${130}>
+        <${AreaChart} data=${data} margin=${{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="ep-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f4cf3a" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#f4cf3a" stopOpacity="0.05" />
+            </linearGradient>
+          </defs>
+          <${CartesianGrid} stroke="#2c261d" strokeDasharray="3 3" vertical=${false} />
+          <${XAxis}
+            dataKey="d"
+            type="number"
+            domain=${[0, profile.length_m]}
+            tickFormatter=${(v) => v >= 1000 ? `${(v / 1000).toFixed(1)} km` : `${Math.round(v)} m`}
+            stroke="#978a72"
+            fontSize=${10}
+            tickLine=${false}
+            axisLine=${{ stroke: "#3a3324" }}
+          />
+          <${YAxis}
+            domain=${["dataMin - 5", "dataMax + 5"]}
+            tickFormatter=${(v) => `${Math.round(v)} m`}
+            stroke="#978a72"
+            fontSize=${10}
+            tickLine=${false}
+            axisLine=${false}
+            width=${44}
+          />
+          <${Tooltip}
+            contentStyle=${{ background: "#1a1610", border: "1px solid #3a3324", borderRadius: 4, fontSize: 12 }}
+            labelFormatter=${(v) => v >= 1000 ? `${(v / 1000).toFixed(2)} km` : `${Math.round(v)} m`}
+            formatter=${(v) => [`${Math.round(v)} moh`, "Høyde"]}
+          />
+          <${Area}
+            type="monotone"
+            dataKey="e"
+            stroke="#f4cf3a"
+            strokeWidth=${2}
+            fill="url(#ep-fill)"
+            isAnimationActive=${false}
+          />
+        <//>
+      <//>
+    </div>
+  `;
+}
+
 function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtappePreselect }) {
-  const { meta, etappeRoutes } = db;
+  const { meta, etappeRoutes, etappeElevation } = db;
   const coords = meta.etappe_coords || [];
   const [activeEt, setActiveEt] = useState(null);
   const containerRef = useRef(null);
@@ -2303,6 +2368,9 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
                     Vis alle løp på etappe ${activeEt} →
                   </button>
                 </div>
+                ${etappeElevation?.[String(activeEt)]
+                  ? html`<${ElevationProfile} profile=${etappeElevation[String(activeEt)]} />`
+                  : null}
                 ${stats.allTime
                   ? html`
                       <div style=${{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
