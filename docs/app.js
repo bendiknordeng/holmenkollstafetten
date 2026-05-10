@@ -686,6 +686,7 @@ function AutoSizedList({ itemCount, itemSize, Row }) {
 
 function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAllYears, cumIndex, compareTids, toggleCompare }) {
   const isComp = compareTids?.includes(tid);
+  const isMobile = useIsMobile();
   const { teams, meta, teamRank, statsOverall, statsKlasse } = db;
   const team = teams[tid];
   if (!team) return null;
@@ -793,50 +794,94 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
           <div className="value">${fmtPace(total, 18495)}</div>
         </div>
       </div>
-      <table className="etappes-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Etappe</th>
-            <th>Løper</th>
-            <th className="right">Dist.</th>
-            <th className="right">Tid</th>
-            <th className="right">Fart</th>
-            <th className="right">Rang ${year}</th>
-            <th className="right">Percentil ${year}</th>
-            <th className="right">Rang alle år</th>
-            <th className="right">Percentil alle år</th>
-            <th className="right">Klassemedian</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(
-            (r) => html`
-              <tr key=${r.etappe}>
-                <td>${r.etappe}</td>
-                <td className="team-name" style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe] || ""}</td>
-                <td className="team-name">${r.runner || "—"}</td>
-                <td className="right muted" style=${{ fontSize: "12px" }}>${r.dMeters ? r.dMeters + " m" : "—"}</td>
-                <td className="right">${fmtTime(r.split_sec)}</td>
-                <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split_sec, r.dMeters)}</td>
-                <td className="right">${r.rkYear ? `${r.rkYear} / ${r.n}` : "—"}</td>
-                <td className="right">
-                  ${r.pctYear != null
-                    ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>`
-                    : "—"}
-                </td>
-                <td className="right">${r.rkAll ? `${r.rkAll} / ${r.nAll}` : "—"}</td>
-                <td className="right">
-                  ${r.pctAll != null
-                    ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>`
-                    : "—"}
-                </td>
-                <td className="right muted">${fmtTime(r.klMedian)}</td>
-              </tr>
-            `,
-          )}
-        </tbody>
-      </table>
+      ${isMobile
+        ? html`
+            <div className="etappe-cards">
+              ${rows.map((r) => html`
+                <div className="etappe-card" key=${r.etappe}>
+                  <div className="etappe-card-head">
+                    <div className="etappe-card-num">${r.etappe}</div>
+                    <div className="etappe-card-title">
+                      <div className="etappe-card-name">${ETAPPE_NAMES[r.etappe] || ""}</div>
+                      <div className="etappe-card-runner">${r.runner || html`<span style=${{ fontStyle: "italic", color: "var(--muted)" }}>(ukjent løper)</span>`}</div>
+                    </div>
+                    <div className="etappe-card-time">
+                      <div className="t">${fmtTime(r.split_sec)}</div>
+                      <div className="p">${fmtPace(r.split_sec, r.dMeters)}${r.dMeters ? ` · ${r.dMeters} m` : ""}</div>
+                    </div>
+                  </div>
+                  <div className="etappe-card-stats">
+                    <div className="s">
+                      <div className="lbl">Rang ${year}</div>
+                      <div className="val">${r.rkYear ? `${r.rkYear} / ${r.n}` : "—"}</div>
+                    </div>
+                    <div className="s">
+                      <div className="lbl">Pct ${year}</div>
+                      <div className="val">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</div>
+                    </div>
+                    <div className="s">
+                      <div className="lbl">Rang alle år</div>
+                      <div className="val">${r.rkAll ? `${r.rkAll} / ${r.nAll}` : "—"}</div>
+                    </div>
+                    <div className="s">
+                      <div className="lbl">Pct alle år</div>
+                      <div className="val">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</div>
+                    </div>
+                    <div className="s">
+                      <div className="lbl">Klassemedian</div>
+                      <div className="val muted">${fmtTime(r.klMedian)}</div>
+                    </div>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `
+        : html`
+            <table className="etappes-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Etappe</th>
+                  <th>Løper</th>
+                  <th className="right">Dist.</th>
+                  <th className="right">Tid</th>
+                  <th className="right">Fart</th>
+                  <th className="right">Rang ${year}</th>
+                  <th className="right">Percentil ${year}</th>
+                  <th className="right">Rang alle år</th>
+                  <th className="right">Percentil alle år</th>
+                  <th className="right">Klassemedian</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(
+                  (r) => html`
+                    <tr key=${r.etappe}>
+                      <td>${r.etappe}</td>
+                      <td className="team-name" style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe] || ""}</td>
+                      <td className="team-name">${r.runner || "—"}</td>
+                      <td className="right muted" style=${{ fontSize: "12px" }}>${r.dMeters ? r.dMeters + " m" : "—"}</td>
+                      <td className="right">${fmtTime(r.split_sec)}</td>
+                      <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split_sec, r.dMeters)}</td>
+                      <td className="right">${r.rkYear ? `${r.rkYear} / ${r.n}` : "—"}</td>
+                      <td className="right">
+                        ${r.pctYear != null
+                          ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>`
+                          : "—"}
+                      </td>
+                      <td className="right">${r.rkAll ? `${r.rkAll} / ${r.nAll}` : "—"}</td>
+                      <td className="right">
+                        ${r.pctAll != null
+                          ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>`
+                          : "—"}
+                      </td>
+                      <td className="right muted">${fmtTime(r.klMedian)}</td>
+                    </tr>
+                  `,
+                )}
+              </tbody>
+            </table>
+          `}
     </div>
     <div className="chart-wrap">
       <h3>Etappetid vs ${year} median</h3>
