@@ -1609,8 +1609,20 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
       </div>
       <div className="content" style=${{ padding: 0, display: "flex", flexDirection: "column" }}>
         ${isMobile ? html`
-          <div className="field" style=${{ margin: "12px 12px 0" }}>
-            <label>Etappe</label>
+          <div
+            className="field"
+            style=${{
+              margin: 0,
+              padding: "10px 12px",
+              background: "var(--bg-2)",
+              borderBottom: "1px solid var(--border)",
+              position: "sticky",
+              top: 0,
+              zIndex: 4,
+              gap: "4px",
+            }}
+          >
+            <label style=${{ margin: 0 }}>Etappe</label>
             ${etappeSelect}
           </div>
         ` : null}
@@ -1882,19 +1894,19 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
       ${open && (flatTids.length > 0 || q.length >= 2 || yearSel.length || klasseSel.length)
         ? html`
             <div style=${{
-              position: isMobile ? "fixed" : "absolute",
-              top: isMobile ? "auto" : "calc(100% + 4px)",
-              bottom: isMobile ? "0" : "auto",
+              position: "absolute",
+              top: "calc(100% + 4px)",
               left: isMobile ? "0" : "auto",
               right: isMobile ? "0" : 0,
-              width: isMobile ? "100vw" : "min(720px, calc(100vw - 60px))",
-              maxHeight: isMobile ? "70vh" : "520px",
+              width: isMobile ? "auto" : "min(720px, calc(100vw - 60px))",
+              maxHeight: isMobile ? "60vh" : "520px",
               overflow: "auto",
               background: "var(--panel)",
               border: "1px solid var(--border-strong)",
-              borderRadius: isMobile ? "12px 12px 0 0" : "4px",
+              borderRadius: "4px",
               boxShadow: "var(--shadow)",
               zIndex: 60,
+              WebkitOverflowScrolling: "touch",
             }}>
               <div style=${{ padding: "8px 12px", borderBottom: "1px solid var(--border-strong)", background: "var(--bg-2)", display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
