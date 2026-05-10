@@ -441,3 +441,79 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .detail h2 { font-size: 16px; }
   .detail .grid { grid-template-columns: 1fr; }
 }
+
+.etappe-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.etappe-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.etappe-card-head {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.etappe-card-num {
+  font-family: "Fraunces", serif;
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1;
+}
+.etappe-card-title { min-width: 0; }
+.etappe-card-name {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.etappe-card-runner {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.etappe-card-time { text-align: right; flex-shrink: 0; }
+.etappe-card-time .t {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+}
+.etappe-card-time .p {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.etappe-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.etappe-card-stats .s { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.etappe-card-stats .lbl {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+.etappe-card-stats .val {
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.etappe-card-stats .val.muted { color: var(--muted); }
