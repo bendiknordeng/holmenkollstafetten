@@ -1256,19 +1256,26 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
 
   const histograms = useMemo(() => {
     if (!allEntries.length) return { bins: [] };
-    const splits = allEntries.map((e) => e.split);
-    const min = Math.min(...splits), max = Math.max(...splits);
-    const NB = 24;
-    const w = (max - min) / NB || 1;
+    // Clip the visible range to p1..p99 so a handful of slow outliers don't
+    // squash the bulk of the distribution into one or two bins. Out-of-range
+    // entries are still counted, just folded into the edge bins.
+    const splits = allEntries.map((e) => e.split).sort((a, b) => a - b);
+    const N = splits.length;
+    const pick = (p) => splits[Math.min(N - 1, Math.max(0, Math.floor(N * p)))];
+    let lo = pick(0.01);
+    let hi = pick(0.99);
+    if (!(hi > lo)) { lo = splits[0]; hi = splits[N - 1] || lo + 1; }
+    const NB = 32;
+    const w = (hi - lo) / NB || 1;
     const yc = {};
     for (const y of meta.years) yc[y] = Array(NB).fill(0);
     for (const e of allEntries) {
-      let idx = Math.floor((e.split - min) / w);
+      let idx = Math.floor((e.split - lo) / w);
       if (idx < 0) idx = 0; if (idx >= NB) idx = NB - 1;
       if (yc[e.year]) yc[e.year][idx]++;
     }
     const bins = Array.from({ length: NB }, (_, i) => {
-      const row = { bucket: min + (i + 0.5) * w };
+      const row = { bucket: lo + (i + 0.5) * w };
       for (const y of meta.years) row[`y${y}`] = yc[y][i];
       return row;
     });
