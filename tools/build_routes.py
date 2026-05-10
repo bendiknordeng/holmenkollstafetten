@@ -109,7 +109,7 @@ def round_coords(points: List[Tuple[float, float]]) -> List[List[float]]:
 
 def main() -> None:
     out: Dict[str, List[List[float]]] = {}
-    stages = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    stages = list(range(1, 16))
     for n in stages:
         path = os.path.join(GPX_DIR, f"etappe-{n}.gpx")
         if not os.path.exists(path):
