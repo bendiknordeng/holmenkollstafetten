@@ -767,8 +767,11 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
 
   return html`
     <${React.Fragment}>
-    <div className="detail">
-      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+    <div className="detail td-detail">
+      <div className="td-head" style=${{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+        ${isMobile ? html`
+          <button className="td-back" onClick=${() => setSelected(null)} aria-label="Tilbake til lagslisten">‹</button>
+        ` : null}
         <div style=${{ flex: 1, minWidth: 0 }}>
           <h2>${name}</h2>
           <div className="sub">
@@ -776,15 +779,15 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
             ${"  "}bib ${bib}${bedrift ? ` · ${bedrift}` : ""}${klasse ? ` · ${klasse}` : ""}
           </div>
         </div>
-        <div style=${{ display: "flex", gap: "6px" }}>
+        <div className="td-head-actions" style=${{ display: "flex", gap: "6px" }}>
           <button
             className=${isComp ? "primary" : "subtle"}
             onClick=${() => toggleCompare?.(tid)}
             title="Sammenlign med andre lag"
           >
-            ${isComp ? "✓ I sammenligning" : "+ Legg til"}
+            ${isComp ? (isMobile ? "✓" : "✓ I sammenligning") : (isMobile ? "+ Sammenl." : "+ Legg til")}
           </button>
-          <button className="subtle" onClick=${() => setSelected(null)}>Lukk ✕</button>
+          ${!isMobile ? html`<button className="subtle" onClick=${() => setSelected(null)}>Lukk ✕</button>` : null}
         </div>
       </div>
       <div className="grid">
@@ -3068,21 +3071,23 @@ function App() {
                 klasseCounts=${klasseCounts}
               />
               <div className="content" style=${{ padding: 0, display: "flex", flexDirection: "column" }}>
-                <div style=${{ flex: selected != null ? 0.4 : 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
-                  <${TeamsView}
-                    db=${db}
-                    filters=${filters}
-                    setFilters=${setFilters}
-                    selected=${selected}
-                    setSelected=${setSelected}
-                    compareTids=${compareTids}
-                    toggleCompare=${toggleCompare}
-                    splitsByTid=${splitsByTid}
-                  />
-                </div>
+                ${!(isMobile && selected != null) ? html`
+                  <div style=${{ flex: !isMobile && selected != null ? 0.4 : 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+                    <${TeamsView}
+                      db=${db}
+                      filters=${filters}
+                      setFilters=${setFilters}
+                      selected=${selected}
+                      setSelected=${setSelected}
+                      compareTids=${compareTids}
+                      toggleCompare=${toggleCompare}
+                      splitsByTid=${splitsByTid}
+                    />
+                  </div>
+                ` : null}
                 ${selected != null
                   ? html`
-                      <div style=${{ flex: 0.6, minHeight: 0, overflow: "auto", padding: "16px", borderTop: "1px solid var(--border)" }}>
+                      <div className=${"team-detail-pane" + (isMobile ? " mobile" : "")} style=${isMobile ? { flex: 1, minHeight: 0, overflow: "auto" } : { flex: 0.6, minHeight: 0, overflow: "auto", padding: "16px", borderTop: "1px solid var(--border)" }}>
                         <${TeamDetail}
                           db=${db}
                           tid=${selected}
