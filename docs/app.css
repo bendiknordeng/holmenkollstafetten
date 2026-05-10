@@ -93,16 +93,26 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .topbar .tabs button:hover { background: var(--panel-2); color: var(--text); }
 .topbar .tabs button.active { background: var(--accent); color: var(--bg); }
 
-.compare-counter {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 12px; border-radius: 4px;
-  background: var(--panel-2); border: 1px solid var(--accent);
-  color: var(--accent); font-weight: 700; font-size: 12px;
-  letter-spacing: 0.05em; text-transform: uppercase;
-  cursor: pointer;
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
-.compare-counter:hover { background: var(--accent); color: var(--bg); }
-.compare-counter .num { font-family: "JetBrains Mono", monospace; font-size: 14px; }
+.topbar .tabs button.active .tab-badge {
+  background: var(--bg);
+  color: var(--accent);
+}
 
 /* ============ MAIN LAYOUT ============ */
 .main { flex: 1; display: flex; min-height: 0; }
@@ -893,7 +903,6 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .topbar .spacer { flex-basis: 100%; height: 0; }
   .topbar .tabs { width: 100%; overflow-x: auto; }
   .topbar .tabs button { padding: 6px 10px; font-size: 12px; flex-shrink: 0; }
-  .compare-counter { padding: 4px 8px; font-size: 11px; }
 
   .main { flex-direction: column; position: relative; }
   .sidebar {
