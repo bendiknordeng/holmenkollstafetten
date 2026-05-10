@@ -980,6 +980,109 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .detail .grid { grid-template-columns: 1fr; }
 }
 
+.etapper-hero-mobile {
+  padding: 14px 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--panel) 0%, var(--bg-2) 100%);
+}
+.etapper-hero-mobile .ehm-kicker {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+.etapper-hero-mobile .ehm-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 700;
+  font-size: 22px;
+  margin: 6px 0 0;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variation-settings: "opsz" 96;
+}
+.etapper-hero-mobile .ehm-title em {
+  color: var(--accent);
+  font-style: italic;
+  font-weight: 500;
+}
+.etapper-hero-mobile .ehm-sub {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.etapper-hero-mobile .ehm-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+.etapper-hero-mobile .ehm-stat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.etapper-hero-mobile .ehm-stat-accent {
+  background: rgba(244,207,58,0.08);
+  border-color: var(--accent);
+}
+.etapper-hero-mobile .ehm-stat .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.etapper-hero-mobile .ehm-stat .val {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.etapper-hero-mobile .ehm-stat-accent .val {
+  color: var(--accent);
+}
+.etapper-hero-mobile .ehm-stat .val .u {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 3px;
+  font-weight: 500;
+}
+.etapper-hero-mobile .ehm-stat .sub {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.etapper-hero-mobile .ehm-cta {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 14px;
+  font-size: 13px;
+  text-align: center;
+}
+@media (max-width: 380px) {
+  .etapper-hero-mobile .ehm-title { font-size: 19px; }
+  .etapper-hero-mobile .ehm-stat .val { font-size: 18px; }
+  .etapper-hero-mobile .ehm-stat .sub { font-size: 9px; }
+}
+
 .etappesok-summary-mobile {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
