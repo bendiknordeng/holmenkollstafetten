@@ -1513,15 +1513,15 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
         </div>
 
         <div className="chart-wrap">
-          <h3>Fordeling <em>over år</em> (stablet)</h3>
+          <h3>Fordeling <em>over år</em></h3>
           <${ResponsiveContainer} width="100%" height=${300}>
-            <${BarChart} data=${histograms.bins}>
+            <${LineChart} data=${histograms.bins}>
               <${CartesianGrid} stroke="#2c261d" strokeDasharray="3 3" />
               <${XAxis} dataKey="bucket" stroke="#978a72" fontSize=${10} tickFormatter=${(v) => fmtTime(v)} />
               <${YAxis} stroke="#978a72" fontSize=${10} />
               <${Tooltip} formatter=${(v, n) => [`${v} løp`, n.replace("y", "")]} labelFormatter=${(l) => "ca. " + fmtTime(l)} contentStyle=${{ background: "#1a1610", border: "1px solid #3a3324", borderRadius: 4 }} />
               <${Legend} wrapperStyle=${{ fontSize: 11 }} />
-              ${meta.years.map((y) => html`<${Bar} key=${y} dataKey=${`y${y}`} stackId="a" fill=${cardColor(y)} name=${String(y)} />`)}
+              ${meta.years.map((y) => html`<${Line} key=${y} type="monotone" dataKey=${`y${y}`} stroke=${cardColor(y)} name=${String(y)} strokeWidth=${2} dot=${false} />`)}
             <//>
           <//>
         </div>
