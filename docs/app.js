@@ -1626,32 +1626,64 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
             ${etappeSelect}
           </div>
         ` : null}
-        <div className="detail" style=${{ margin: "12px" }}>
-          <h2>Etappe ${etappe} · ${ETAPPE_NAMES[etappe]}</h2>
-          <div className="sub">${meta.etappe_distances[etappe]} m · ${entries.length.toLocaleString("no")} løp etappen i utvalget · median pace ${stat.length ? fmtPace(stat[Math.floor(stat.length / 2)], meta.etappe_distances[etappe]) : "—"}</div>
-          ${stat.length
-            ? html`
-                <div className="grid">
-                  <div className="stat" key="r">
-                    <div className="label">Raskest</div>
-                    <div className="value">${fmtTime(stat[0])}</div>
-                  </div>
-                  <div className="stat" key="m">
-                    <div className="label">Median</div>
-                    <div className="value">${fmtTime(stat[Math.floor(stat.length / 2)])}</div>
-                  </div>
-                  <div className="stat" key="t">
-                    <div className="label">Tregest</div>
-                    <div className="value">${fmtTime(stat[stat.length - 1])}</div>
-                  </div>
-                  <div className="stat" key="n">
-                    <div className="label">Antall</div>
-                    <div className="value">${stat.length.toLocaleString("no")}</div>
-                  </div>
+        ${isMobile
+          ? html`
+              <div className="etappesok-summary-mobile">
+                <div className="ess-meta">
+                  ${meta.etappe_distances[etappe]} m · ${entries.length.toLocaleString("no")} løp · median ${stat.length ? fmtPace(stat[Math.floor(stat.length / 2)], meta.etappe_distances[etappe]) : "—"}
                 </div>
-              `
-            : null}
-        </div>
+                ${stat.length
+                  ? html`
+                      <div className="ess-stats">
+                        <div className="ess-stat">
+                          <div className="lbl">Raskest</div>
+                          <div className="val">${fmtTime(stat[0])}</div>
+                        </div>
+                        <div className="ess-stat">
+                          <div className="lbl">Median</div>
+                          <div className="val">${fmtTime(stat[Math.floor(stat.length / 2)])}</div>
+                        </div>
+                        <div className="ess-stat">
+                          <div className="lbl">Tregest</div>
+                          <div className="val">${fmtTime(stat[stat.length - 1])}</div>
+                        </div>
+                        <div className="ess-stat">
+                          <div className="lbl">Antall</div>
+                          <div className="val">${stat.length.toLocaleString("no")}</div>
+                        </div>
+                      </div>
+                    `
+                  : null}
+              </div>
+            `
+          : html`
+              <div className="detail" style=${{ margin: "12px" }}>
+                <h2>Etappe ${etappe} · ${ETAPPE_NAMES[etappe]}</h2>
+                <div className="sub">${meta.etappe_distances[etappe]} m · ${entries.length.toLocaleString("no")} løp etappen i utvalget · median pace ${stat.length ? fmtPace(stat[Math.floor(stat.length / 2)], meta.etappe_distances[etappe]) : "—"}</div>
+                ${stat.length
+                  ? html`
+                      <div className="grid">
+                        <div className="stat" key="r">
+                          <div className="label">Raskest</div>
+                          <div className="value">${fmtTime(stat[0])}</div>
+                        </div>
+                        <div className="stat" key="m">
+                          <div className="label">Median</div>
+                          <div className="value">${fmtTime(stat[Math.floor(stat.length / 2)])}</div>
+                        </div>
+                        <div className="stat" key="t">
+                          <div className="label">Tregest</div>
+                          <div className="value">${fmtTime(stat[stat.length - 1])}</div>
+                        </div>
+                        <div className="stat" key="n">
+                          <div className="label">Antall</div>
+                          <div className="value">${stat.length.toLocaleString("no")}</div>
+                        </div>
+                      </div>
+                    `
+                  : null}
+              </div>
+            `}
         <div className="table-wrap" style=${{ flex: 1, minHeight: 0 }}>
           <div className="table-header" style=${{ gridTemplateColumns: "32px 50px 60px 1.6fr 1.2fr 1fr 80px 95px 80px 80px 80px", display: isMobile ? "none" : undefined }}>
             <div></div>
