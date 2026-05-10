@@ -1508,16 +1508,22 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
     setKlasseSel([...set]);
   };
 
+  const etappeSelect = html`
+    <select value=${etappe} onChange=${(e) => setEtappe(parseInt(e.target.value, 10))}>
+      ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((e) => html`<option key=${e} value=${e}>${e}: ${ETAPPE_NAMES[e]}</option>`)}
+    </select>
+  `;
+
   return html`
     <${React.Fragment}>
       <div className="sidebar">
-        <div className="field">
-          <label>Etappe</label>
-          <select value=${etappe} onChange=${(e) => setEtappe(parseInt(e.target.value, 10))}>
-            ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((e) => html`<option key=${e} value=${e}>${e}: ${ETAPPE_NAMES[e]}</option>`)}
-          </select>
-          <div style=${{ fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}>${meta.etappe_distances[etappe]} m</div>
-        </div>
+        ${!isMobile ? html`
+          <div className="field">
+            <label>Etappe</label>
+            ${etappeSelect}
+            <div style=${{ fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}>${meta.etappe_distances[etappe]} m</div>
+          </div>
+        ` : null}
         <div className="field">
           <label>År ${yearSel.length ? `(${yearSel.length})` : "(alle)"}</label>
           <div className="chips">
@@ -1557,6 +1563,12 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
         </div>
       </div>
       <div className="content" style=${{ padding: 0, display: "flex", flexDirection: "column" }}>
+        ${isMobile ? html`
+          <div className="field" style=${{ margin: "12px 12px 0" }}>
+            <label>Etappe</label>
+            ${etappeSelect}
+          </div>
+        ` : null}
         <div className="detail" style=${{ margin: "12px" }}>
           <h2>Etappe ${etappe} · ${ETAPPE_NAMES[etappe]}</h2>
           <div className="sub">${meta.etappe_distances[etappe]} m · ${entries.length.toLocaleString("no")} løp etappen i utvalget · median pace ${stat.length ? fmtPace(stat[Math.floor(stat.length / 2)], meta.etappe_distances[etappe]) : "—"}</div>
