@@ -2837,8 +2837,8 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
         <div className="detail">
           <div className="kicker">Etappetider</div>
           <h2>Per etappe</h2>
-          <div style=${{ overflowX: "auto", marginTop: "8px" }}>
-          <table className="etappes-table" style=${{ minWidth: "max-content" }}>
+          <div className="compare-splits-scroll" style=${{ overflowX: "auto", WebkitOverflowScrolling: "touch", marginTop: "8px" }}>
+          <table className="etappes-table compare-splits" style=${{ minWidth: "max-content" }}>
             <thead>
               <tr>
                 <th>#</th>
