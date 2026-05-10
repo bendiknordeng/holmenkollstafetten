@@ -1178,6 +1178,7 @@ function EtappeKlasseFilter({ klasseFacets, klasseSel, setKlasseSel, toggleKlass
 
 function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, setEtappePreselect }) {
   const { teams, meta, statsOverall } = db;
+  const isMobile = useIsMobile();
   const [etappe, setEtappe] = usePersistedState("hk:etapper:etappe", 7);
   const [klasseSel, setKlasseSel] = usePersistedState("hk:etapper:klasseSel", []);
 
@@ -1285,6 +1286,12 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
   const profile = ETAPPE_PROFILES[etappe] || {};
   const cardColor = (year) => `var(--c-${year})`;
 
+  const etappeSelect = html`
+    <select value=${etappe} onChange=${(e) => setEtappe(parseInt(e.target.value, 10))}>
+      ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((e) => html`<option key=${e} value=${e}>${e}: ${ETAPPE_NAMES[e]}</option>`)}
+    </select>
+  `;
+
   return html`
     <${React.Fragment}>
     <div className="sidebar" style=${{ gap: "20px" }}>
@@ -1335,42 +1342,94 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
     </div>
 
     <div style=${{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
-      <div className="etapper-hero" style=${{ padding: "20px 28px 24px", borderBottom: "1px solid var(--border)", background: "linear-gradient(135deg, var(--panel) 0%, var(--bg-2) 100%)", position: "relative" }}>
-        <div aria-hidden="true" style=${{ position: "absolute", right: 0, top: 0, bottom: 0, width: "320px", overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
-          <div style=${{ position: "absolute", right: "-30px", top: "-60px", fontFamily: "Fraunces, serif", fontWeight: 900, fontSize: "320px", color: "rgba(244,207,58,0.05)", lineHeight: 0.8, userSelect: "none" }}>${etappe}</div>
+      ${isMobile ? html`
+        <div
+          className="field etapper-mobile-select"
+          style=${{
+            margin: 0,
+            padding: "10px 12px",
+            background: "var(--bg-2)",
+            borderBottom: "1px solid var(--border)",
+            position: "sticky",
+            top: 0,
+            zIndex: 4,
+            gap: "4px",
+          }}
+        >
+          <label style=${{ margin: 0 }}>Etappe</label>
+          ${etappeSelect}
         </div>
-        <div style=${{ position: "relative", zIndex: 1 }}>
-          <div className="kicker">Etappe ${etappe} · ${dist} m</div>
-          <h2 style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "44px", margin: "8px 0 0", letterSpacing: "-0.02em", lineHeight: 1.05 }}>
-            ${ETAPPE_NAMES[etappe]?.split(" → ")[0] || ""} <em style=${{ color: "var(--accent)", fontWeight: 500, fontStyle: "italic" }}>→</em> ${ETAPPE_NAMES[etappe]?.split(" → ")[1] || ""}
+      ` : null}
+      ${isMobile ? html`
+        <div className="etapper-hero-mobile">
+          <div className="ehm-kicker">Etappe ${etappe}</div>
+          <h2 className="ehm-title">
+            ${ETAPPE_NAMES[etappe]?.split(" → ")[0] || ""} <em>→</em> ${ETAPPE_NAMES[etappe]?.split(" → ")[1] || ""}
           </h2>
-          <div style=${{ color: "var(--muted)", fontStyle: "italic", fontSize: "14px", marginTop: "6px", marginBottom: "16px", maxWidth: "640px" }}>${profile.karakter || ""}</div>
-          <div style=${{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px", marginTop: "20px" }}>
-            <div style=${{ padding: "12px 16px", background: "rgba(244,207,58,0.06)", border: "1px solid var(--accent)", borderRadius: "5px" }}>
-              <div className="kicker">Distanse</div>
-              <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1, color: "var(--accent)" }}>${dist}<span style=${{ fontSize: "16px", color: "var(--muted)", marginLeft: "4px" }}>m</span></div>
+          ${profile.karakter ? html`<div className="ehm-sub">${profile.karakter}</div>` : null}
+          <div className="ehm-stats">
+            <div className="ehm-stat ehm-stat-accent">
+              <div className="lbl">Distanse</div>
+              <div className="val">${dist}<span className="u">m</span></div>
             </div>
             ${allTimeStats ? html`
-              <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
-                <div className="kicker">All-time rekord</div>
-                <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.min)}</div>
-                <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.min, dist)}</div>
+              <div className="ehm-stat">
+                <div className="lbl">Rekord</div>
+                <div className="val">${fmtTime(allTimeStats.min)}</div>
+                <div className="sub">${fmtPace(allTimeStats.min, dist)}</div>
               </div>
-              <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
-                <div className="kicker">Median</div>
-                <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.median)}</div>
-                <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.median, dist)}</div>
+              <div className="ehm-stat">
+                <div className="lbl">Median</div>
+                <div className="val">${fmtTime(allTimeStats.median)}</div>
+                <div className="sub">${fmtPace(allTimeStats.median, dist)}</div>
               </div>
-              <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
-                <div className="kicker">Antall løp</div>
-                <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${allTimeStats.n.toLocaleString("no")}</div>
-                <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>over ${meta.years.length} år</div>
+              <div className="ehm-stat">
+                <div className="lbl">Løp</div>
+                <div className="val">${allTimeStats.n.toLocaleString("no")}</div>
+                <div className="sub">over ${meta.years.length} år</div>
               </div>
             ` : null}
           </div>
-          <button className="primary" style=${{ marginTop: "20px" }} onClick=${() => { setEtappePreselect && setEtappePreselect(etappe); setView("etappesok"); }}>Utforsk alle løp på etappe ${etappe} →</button>
+          <button className="primary ehm-cta" onClick=${() => { setEtappePreselect && setEtappePreselect(etappe); setView("etappesok"); }}>Utforsk alle løp på etappe ${etappe} →</button>
         </div>
-      </div>
+      ` : html`
+        <div className="etapper-hero" style=${{ padding: "20px 28px 24px", borderBottom: "1px solid var(--border)", background: "linear-gradient(135deg, var(--panel) 0%, var(--bg-2) 100%)", position: "relative" }}>
+          <div aria-hidden="true" style=${{ position: "absolute", right: 0, top: 0, bottom: 0, width: "320px", overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
+            <div style=${{ position: "absolute", right: "-30px", top: "-60px", fontFamily: "Fraunces, serif", fontWeight: 900, fontSize: "320px", color: "rgba(244,207,58,0.05)", lineHeight: 0.8, userSelect: "none" }}>${etappe}</div>
+          </div>
+          <div style=${{ position: "relative", zIndex: 1 }}>
+            <div className="kicker">Etappe ${etappe} · ${dist} m</div>
+            <h2 style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "44px", margin: "8px 0 0", letterSpacing: "-0.02em", lineHeight: 1.05 }}>
+              ${ETAPPE_NAMES[etappe]?.split(" → ")[0] || ""} <em style=${{ color: "var(--accent)", fontWeight: 500, fontStyle: "italic" }}>→</em> ${ETAPPE_NAMES[etappe]?.split(" → ")[1] || ""}
+            </h2>
+            <div style=${{ color: "var(--muted)", fontStyle: "italic", fontSize: "14px", marginTop: "6px", marginBottom: "16px", maxWidth: "640px" }}>${profile.karakter || ""}</div>
+            <div style=${{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px", marginTop: "20px" }}>
+              <div style=${{ padding: "12px 16px", background: "rgba(244,207,58,0.06)", border: "1px solid var(--accent)", borderRadius: "5px" }}>
+                <div className="kicker">Distanse</div>
+                <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1, color: "var(--accent)" }}>${dist}<span style=${{ fontSize: "16px", color: "var(--muted)", marginLeft: "4px" }}>m</span></div>
+              </div>
+              ${allTimeStats ? html`
+                <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
+                  <div className="kicker">All-time rekord</div>
+                  <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.min)}</div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.min, dist)}</div>
+                </div>
+                <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
+                  <div className="kicker">Median</div>
+                  <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.median)}</div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.median, dist)}</div>
+                </div>
+                <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
+                  <div className="kicker">Antall løp</div>
+                  <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${allTimeStats.n.toLocaleString("no")}</div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>over ${meta.years.length} år</div>
+                </div>
+              ` : null}
+            </div>
+            <button className="primary" style=${{ marginTop: "20px" }} onClick=${() => { setEtappePreselect && setEtappePreselect(etappe); setView("etappesok"); }}>Utforsk alle løp på etappe ${etappe} →</button>
+          </div>
+        </div>
+      `}
 
       <div className="etapper-grid-2" style=${{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "20px", padding: "20px 28px" }}>
         <div className="detail">
