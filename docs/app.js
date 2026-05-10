@@ -2147,16 +2147,28 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       maxZoom: 19,
     }).addTo(map);
 
-    // Per-etappe base polylines (the dim "ribbon" beneath the highlighted active stage).
+    // Per-etappe base polylines: a darker casing under a saffron line
+    // for clear contrast against the OSM tiles.
     const allPathsForBounds = [];
     for (let e = 1; e <= 15; e++) {
       const path = stagePath(e);
       if (!path) continue;
       const isApprox = !etappeRoutes?.[String(e)];
-      const layer = L.polyline(path, {
-        color: "#5e5444",
-        weight: 4,
+      // Casing
+      L.polyline(path, {
+        color: "#0a0908",
+        weight: 8,
         opacity: 0.55,
+        lineCap: "round",
+        lineJoin: "round",
+      }).addTo(map);
+      // Foreground stroke
+      const layer = L.polyline(path, {
+        color: "#f4cf3a",
+        weight: 4.5,
+        opacity: 0.85,
+        lineCap: "round",
+        lineJoin: "round",
         dashArray: isApprox ? "6 8" : null,
       }).addTo(map);
       layer.on("click", () => setActiveEt(e));
@@ -2169,12 +2181,13 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       map.fitBounds(coords.map((c) => [c.lat, c.lon]), { padding: [40, 40] });
     }
 
-    // Markers
+    // Markers: every chip-mat is labelled with the stage that STARTS at it.
+    // Chip 0 = start of stage 1 -> "1"; chip 14 = start of stage 15 -> "15";
+    // chip 15 is the finish line -> "M".
     coords.forEach((c, i) => {
-      const isStart = i === 0;
       const isFinish = i === coords.length - 1;
-      const cls = isStart ? "etappe-marker start" : isFinish ? "etappe-marker finish" : "etappe-marker";
-      const label = isStart ? "S" : isFinish ? "M" : String(i);
+      const label = isFinish ? "M" : String(i + 1);
+      const cls = isFinish ? "etappe-marker finish" : i === 0 ? "etappe-marker start" : "etappe-marker";
       const icon = L.divIcon({
         className: "",
         iconSize: [28, 28],
@@ -2184,8 +2197,9 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       const m = L.marker([c.lat, c.lon], { icon });
       m.bindTooltip(c.navn, { direction: "top", offset: [0, -14] });
       m.on("click", () => {
-        // Etappe number = i (i=0 is start, i=1 is end of etappe 1, etc.)
-        setActiveEt(i === 0 ? 1 : i);
+        // Click the finish marker -> the stage that ends there (15).
+        // Otherwise -> the stage that starts at this chip-mat.
+        setActiveEt(isFinish ? 15 : i + 1);
       });
       m.addTo(map);
       markersRef.current.push(m);
@@ -2215,9 +2229,9 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
     const path = stagePath(activeEt);
     if (!path) return;
     segLayerRef.current = L.polyline(path, {
-      color: "#f4cf3a",
-      weight: 6,
-      opacity: 0.95,
+      color: "#ec7b3a",
+      weight: 7,
+      opacity: 1,
       lineCap: "round",
       lineJoin: "round",
     }).addTo(mapRef.current);
