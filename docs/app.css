@@ -971,6 +971,26 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .etappes-table th:nth-child(n+5), .etappes-table td:nth-child(n+5) {
     display: none;
   }
+  /* Compare-page splits table needs all team columns visible — let the
+     horizontal scroll container handle overflow instead of hiding cols. */
+  .etappes-table.compare-splits th,
+  .etappes-table.compare-splits td {
+    display: table-cell;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+  .etappes-table.compare-splits { font-size: 11px; }
+  .etappes-table.compare-splits th { font-size: 9px; }
+  .compare-splits-scroll {
+    margin-left: -12px;
+    margin-right: -12px;
+    padding: 0 12px;
+  }
+  .compare-splits-scroll::-webkit-scrollbar { height: 6px; }
+  .compare-splits-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 3px;
+  }
 
   .chart-wrap { padding: 10px; }
   .chart-wrap h3 { font-size: 13px; }
