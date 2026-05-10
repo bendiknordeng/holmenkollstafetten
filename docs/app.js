@@ -1807,11 +1807,51 @@ function ClasseFilterChips({ klasser, klasseSel, toggleK }) {
 }
 
 function TeamChipList({ items, toggleCompare }) {
+  const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? items : items.slice(0, 16);
+
+  if (isMobile && !expanded && items.length > 0) {
+    return html`
+      <div
+        className="compare-team-list compact"
+        onClick=${() => setExpanded(true)}
+        role="button"
+      >
+        <div className="compact-summary">
+          <span className="compact-count">${items.length} lag valgt</span>
+          <div className="compact-swatches">
+            ${items.slice(0, 10).map(
+              (it) => html`
+                <span
+                  key=${it.key}
+                  className="swatch-dot"
+                  style=${{ background: it.color }}
+                  title=${`${it.team[3]} · ${it.team[1]}`}
+                ></span>
+              `,
+            )}
+            ${items.length > 10
+              ? html`<span className="compact-more">+${items.length - 10}</span>`
+              : null}
+          </div>
+        </div>
+        <span className="compact-chevron">▾</span>
+      </div>
+    `;
+  }
+
+  const desktopLimit = 16;
+  const visible = isMobile || expanded ? items : items.slice(0, desktopLimit);
   const hiddenCount = items.length - visible.length;
+
   return html`
     <div className="compare-team-list">
+      ${isMobile
+        ? html`<button
+            className="subtle compact-collapse"
+            onClick=${() => setExpanded(false)}
+          >− Skjul</button>`
+        : null}
       ${visible.map(
         (it) => html`
           <div className="compare-team-card" key=${it.key} style=${{ "--swatch": it.color }}>
@@ -1824,7 +1864,7 @@ function TeamChipList({ items, toggleCompare }) {
       )}
       ${hiddenCount > 0
         ? html`<button className="subtle" onClick=${() => setExpanded(true)}>+ ${hiddenCount} flere</button>`
-        : items.length > 16
+        : !isMobile && items.length > desktopLimit
           ? html`<button className="subtle" onClick=${() => setExpanded(false)}>Skjul</button>`
           : null}
     </div>
@@ -2310,6 +2350,42 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
     return rows;
   }, [items]);
 
+  // For each etappe, find the selected team with the fastest split.
+  const dreamLineup = useMemo(() => {
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      let best = null;
+      for (const it of items) {
+        const s = it.splits.find((x) => x[1] === e);
+        if (!s || s[2] == null) continue;
+        if (!best || s[2] < best.split) {
+          best = { etappe: e, item: it, split: s[2], runner: s[4] || "" };
+        }
+      }
+      out.push(best || { etappe: e, item: null, split: null, runner: "" });
+    }
+    return out;
+  }, [items]);
+
+  const dreamComplete = dreamLineup.every((b) => b.split != null);
+  const dreamTotal = dreamLineup.reduce((sum, b) => sum + (b.split || 0), 0);
+  const actualBestTotal = useMemo(() => {
+    const totals = items.map((it) => it.team[6]).filter((t) => t != null);
+    return totals.length ? Math.min(...totals) : null;
+  }, [items]);
+
+  const winsByTeam = useMemo(() => {
+    const m = new Map();
+    for (const b of dreamLineup) {
+      if (!b.item) continue;
+      m.set(b.item.key, (m.get(b.item.key) || 0) + 1);
+    }
+    return items
+      .map((it) => ({ item: it, wins: m.get(it.key) || 0 }))
+      .filter((x) => x.wins > 0)
+      .sort((a, b) => b.wins - a.wins);
+  }, [dreamLineup, items]);
+
   // Rank progression per team across etapper (overall).
   const rankData = useMemo(() => {
     if (!cumIndex) return [];
@@ -2387,6 +2463,78 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
                   </div>
                 `;
               })}
+          </div>
+        </div>
+
+        <div className="detail dream-card">
+          <div className="kicker">Drømmelag · best-of-valgte</div>
+          <h2>Toppet lag <em>blant valgte</em></h2>
+
+          <div className="dream-summary">
+            <div className="dream-total">
+              <div className="lbl">Drømmetid</div>
+              <div className="val">${fmtTime(dreamComplete ? dreamTotal : null)}</div>
+              ${dreamComplete && actualBestTotal != null && actualBestTotal > dreamTotal
+                ? html`<div className="delta">−${fmtTime(actualBestTotal - dreamTotal)} vs raskeste i utvalget</div>`
+                : !dreamComplete
+                  ? html`<div className="delta muted">Mangler splits på noen etapper</div>`
+                  : html`<div className="delta muted">Lik raskeste i utvalget</div>`}
+            </div>
+            ${winsByTeam.length
+              ? html`
+                  <div className="dream-wins">
+                    <div className="lbl">Etappevinnere</div>
+                    <div className="dream-wins-row">
+                      ${winsByTeam.map(
+                        (w) => html`
+                          <span
+                            className="dream-win-chip"
+                            key=${w.item.key}
+                            style=${{ borderLeftColor: w.item.color }}
+                            title=${`${w.item.team[3]} (${w.item.team[1]})`}
+                          >
+                            <span className="name">${w.item.team[3]}</span>
+                            <span className=${"chip year-" + w.item.team[1]}>${w.item.team[1]}</span>
+                            <span className="count">${w.wins}</span>
+                          </span>
+                        `,
+                      )}
+                    </div>
+                  </div>
+                `
+              : null}
+          </div>
+
+          <div className="dream-stages">
+            ${dreamLineup.map((b) => {
+              const dist = meta.etappe_distances[b.etappe];
+              return html`
+                <div
+                  className=${"dream-stage" + (b.item ? "" : " empty")}
+                  key=${b.etappe}
+                  style=${{ borderLeftColor: b.item?.color || "var(--border-strong)" }}
+                  onClick=${() => b.item && setSelected(b.item.tid)}
+                >
+                  <div className="num">${b.etappe}</div>
+                  <div className="info">
+                    <div className="stage-name">${ETAPPE_NAMES[b.etappe] || ""}</div>
+                    ${b.item
+                      ? html`
+                          <div className="team">
+                            <span className="t-name" title=${b.item.team[3]}>${b.item.team[3]}</span>
+                            <span className=${"chip year-" + b.item.team[1]}>${b.item.team[1]}</span>
+                          </div>
+                          <div className="runner">${b.runner || html`<span className="muted">(ukjent løper)</span>`}</div>
+                        `
+                      : html`<div className="muted">Ingen split i utvalget</div>`}
+                  </div>
+                  <div className="time">
+                    <div className="t">${fmtTime(b.split)}</div>
+                    <div className="p">${fmtPace(b.split, dist)}</div>
+                  </div>
+                </div>
+              `;
+            })}
           </div>
         </div>
 
