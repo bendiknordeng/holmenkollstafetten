@@ -338,20 +338,14 @@ function Topbar({ view, setView, n, compareCount, hasSidebar, sidebarOpen, setSi
       ` : null}
       <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2019–2026</span></h1>
       <div className="spacer"></div>
-      ${compareCount > 0
-        ? html`
-            <div className="compare-counter" onClick=${() => setView("compare")}>
-              <span>Sammenlign</span>
-              <span className="num">${compareCount}</span>
-            </div>
-          `
-        : null}
       <div className="tabs">
         <button className=${view === "teams" ? "active" : ""} onClick=${() => setView("teams")}>Lag</button>
         <button className=${view === "etapper" ? "active" : ""} onClick=${() => setView("etapper")}>Etapper</button>
         <button className=${view === "etappesok" ? "active" : ""} onClick=${() => setView("etappesok")}>Etappe-søk</button>
         <button className=${view === "rute" ? "active" : ""} onClick=${() => setView("rute")}>Rute</button>
-        <button className=${view === "compare" ? "active" : ""} onClick=${() => setView("compare")}>Sammenligning${compareCount ? ` (${compareCount})` : ""}</button>
+        <button className=${view === "compare" ? "active" : ""} onClick=${() => setView("compare")}>
+          ${isMobile ? "Sammenlign" : "Sammenligning"}${compareCount ? html` <span className="tab-badge">${compareCount}</span>` : null}
+        </button>
       </div>
     </div>
   `;
