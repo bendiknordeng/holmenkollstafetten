@@ -84,6 +84,20 @@ function rankOf(sortedArr, value) {
   return lo + 1;
 }
 
+function usePersistedState(key, init) {
+  const [v, setV] = useState(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
+      if (raw != null) return JSON.parse(raw);
+    } catch {}
+    return typeof init === "function" ? init() : init;
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem(key, JSON.stringify(v)); } catch {}
+  }, [key, v]);
+  return [v, setV];
+}
+
 function useIsMobile(breakpoint = 820) {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(`(max-width: ${breakpoint}px)`).matches : false,
@@ -1170,8 +1184,8 @@ function EtappeKlasseFilter({ klasseFacets, klasseSel, setKlasseSel, toggleKlass
 
 function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, setEtappePreselect }) {
   const { teams, meta, statsOverall } = db;
-  const [etappe, setEtappe] = useState(7);
-  const [klasseSel, setKlasseSel] = useState([]);
+  const [etappe, setEtappe] = usePersistedState("hk:etapper:etappe", 7);
+  const [klasseSel, setKlasseSel] = usePersistedState("hk:etapper:klasseSel", []);
 
   const rawEntries = useMemo(() => {
     const out = [];
@@ -1462,18 +1476,18 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
   const { teams, meta, statsOverall } = db;
   const compareSet = useMemo(() => new Set(compareTids), [compareTids]);
   const isMobile = useIsMobile();
-  const [etappe, setEtappe] = useState(7);
+  const [etappe, setEtappe] = usePersistedState("hk:etappesok:etappe", 7);
   useEffect(() => {
     if (etappePreselect != null) {
       setEtappe(etappePreselect);
       clearPreselect && clearPreselect();
     }
   }, [etappePreselect]);
-  const [yearSel, setYearSel] = useState([]);
-  const [klasseSel, setKlasseSel] = useState([]);
+  const [yearSel, setYearSel] = usePersistedState("hk:etappesok:yearSel", []);
+  const [klasseSel, setKlasseSel] = usePersistedState("hk:etappesok:klasseSel", []);
   const [q, setQ] = useState("");
   const [klasseQ, setKlasseQ] = useState("");
-  const [sortDesc, setSortDesc] = useState(false);
+  const [sortDesc, setSortDesc] = usePersistedState("hk:etappesok:sortDesc", false);
 
   const filteredKlasser = useMemo(() => {
     const qq = klasseQ.toLowerCase();
@@ -2325,8 +2339,55 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
   `;
 }
 
-function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare, cumIndex, statsAllYears, setSelected, setView }) {
+function RecentComparesPanel({ title, recents, teams, restoreCompare, removeRecentCompare, compact }) {
+  if (!recents || recents.length === 0) return null;
+  return html`
+    <div className=${"recent-compares" + (compact ? " compact" : "")}>
+      <div className="rc-title">${title}</div>
+      <div className="rc-list">
+        ${recents.map((s) => {
+          const previewNames = s.tids.slice(0, 3).map((tid) => teams[tid]?.[3]).filter(Boolean);
+          const yearChips = s.tids
+            .map((tid) => teams[tid]?.[1])
+            .filter((y) => y != null);
+          const uniqYears = [...new Set(yearChips)].sort();
+          return html`
+            <div className="rc-card" key=${s.ts}>
+              <button
+                className="rc-restore"
+                onClick=${() => restoreCompare(s.tids)}
+                title="Last inn denne sammenligningen"
+              >
+                <div className="rc-count">${s.tids.length} lag</div>
+                <div className="rc-summary">
+                  ${previewNames.join(" · ")}${s.tids.length > 3 ? ` +${s.tids.length - 3}` : ""}
+                </div>
+                <div className="rc-years">
+                  ${uniqYears.map((y) => html`<span key=${y} className=${"chip year-" + y}>${y}</span>`)}
+                </div>
+              </button>
+              <button
+                className="rc-remove"
+                onClick=${(e) => { e.stopPropagation(); removeRecentCompare(s.ts); }}
+                title="Fjern fra historikken"
+              >✕</button>
+            </div>
+          `;
+        })}
+      </div>
+    </div>
+  `;
+}
+
+function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare, cumIndex, statsAllYears, setSelected, setView, recentCompares, restoreCompare, removeRecentCompare }) {
   const { teams, meta } = db;
+  const isMobile = useIsMobile();
+  const otherRecents = useMemo(() => {
+    const cur = [...compareTids].sort((a, b) => a - b).join(",");
+    return (recentCompares || []).filter(
+      (s) => [...s.tids].sort((a, b) => a - b).join(",") !== cur,
+    );
+  }, [recentCompares, compareTids]);
   const items = compareTids.map((tid, i) => ({
     tid,
     team: teams[tid],
@@ -2416,6 +2477,17 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
           </div>
           <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
         </div>
+        ${otherRecents.length
+          ? html`
+              <${RecentComparesPanel}
+                title="Siste sammenligninger"
+                recents=${otherRecents}
+                teams=${teams}
+                restoreCompare=${restoreCompare}
+                removeRecentCompare=${removeRecentCompare}
+              />
+            `
+          : null}
         <div className="empty">
           <div className="kicker">Tom sammenligning</div>
           Søk over, eller trykk + i lagslisten / etappe-søk for å legge til.
@@ -2424,19 +2496,45 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
     `;
   }
 
+  const compactHeader = isMobile;
+
   return html`
     <div style=${{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
-      <div className="compare-header">
-        <div>
-          <div className="kicker">Sammenligning · ${items.length} lag</div>
-          <h2>Side mot <em>side</em></h2>
-        </div>
-        <div style=${{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-          <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
-          <button className="subtle danger" onClick=${clearCompare}>Tøm alle</button>
-        </div>
-      </div>
+      ${compactHeader
+        ? html`
+            <div className="compare-header compact">
+              <div className="kicker">Sammenligning · ${items.length} lag</div>
+              <div className="compact-actions">
+                <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
+                <button className="subtle danger" onClick=${clearCompare} title="Tøm alle">Tøm</button>
+              </div>
+            </div>
+          `
+        : html`
+            <div className="compare-header">
+              <div>
+                <div className="kicker">Sammenligning · ${items.length} lag</div>
+                <h2>Side mot <em>side</em></h2>
+              </div>
+              <div style=${{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+                <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
+                <button className="subtle danger" onClick=${clearCompare}>Tøm alle</button>
+              </div>
+            </div>
+          `}
       <${TeamChipList} items=${items} toggleCompare=${toggleCompare} />
+      ${otherRecents.length
+        ? html`
+            <${RecentComparesPanel}
+              title="Bytt til tidligere sammenligning"
+              recents=${otherRecents}
+              teams=${teams}
+              restoreCompare=${restoreCompare}
+              removeRecentCompare=${removeRecentCompare}
+              compact=${true}
+            />
+          `
+        : null}
       <div className="content" style=${{ padding: "20px" }}>
         <div className="detail">
           <div className="kicker">Sammendrag</div>
@@ -2692,8 +2790,8 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
 
 function App() {
   const [db, setDb] = useState(null);
-  const [view, setView] = useState("teams");
-  const [filters, setFilters] = useState({
+  const [view, setView] = usePersistedState("hk:view", "teams");
+  const [filters, setFilters] = usePersistedState("hk:filters", {
     q: [],
     qField: "team",
     years: [],
@@ -2701,7 +2799,8 @@ function App() {
     onlyFinished: false,
   });
   const [selected, setSelected] = useState(null);
-  const [compareTids, setCompareTids] = useState([]);
+  const [compareTids, setCompareTids] = usePersistedState("hk:compare", []);
+  const [recentCompares, setRecentCompares] = usePersistedState("hk:recentCompares", []);
   const [etappePreselect, setEtappePreselect] = useState(null);
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -2711,7 +2810,29 @@ function App() {
   const toggleCompare = useCallback(
     (tid) =>
       setCompareTids((cur) => (cur.includes(tid) ? cur.filter((t) => t !== tid) : [...cur, tid])),
-    [],
+    [setCompareTids],
+  );
+  // Auto-snapshot the current compare set into recent comparisons (debounced).
+  useEffect(() => {
+    if (compareTids.length < 2) return;
+    const t = setTimeout(() => {
+      const sortedKey = [...compareTids].sort((a, b) => a - b).join(",");
+      setRecentCompares((prev) => {
+        const filtered = (prev || []).filter(
+          (s) => [...s.tids].sort((a, b) => a - b).join(",") !== sortedKey,
+        );
+        return [{ tids: [...compareTids], ts: Date.now() }, ...filtered].slice(0, 6);
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [compareTids, setRecentCompares]);
+  const restoreCompare = useCallback(
+    (tids) => setCompareTids([...tids]),
+    [setCompareTids],
+  );
+  const removeRecentCompare = useCallback(
+    (ts) => setRecentCompares((prev) => (prev || []).filter((s) => s.ts !== ts)),
+    [setRecentCompares],
   );
   const clearCompare = useCallback(() => setCompareTids([]), []);
 
@@ -2908,7 +3029,7 @@ function App() {
           ? html`<${EtappeSokView} db=${db} splitsByTid=${splitsByTid} setSelected=${setSelected} setView=${setView} statsAllYears=${statsAllYears} compareTids=${compareTids} toggleCompare=${toggleCompare} etappePreselect=${etappePreselect} clearPreselect=${() => setEtappePreselect(null)} />`
           : view === "rute"
           ? html`<${MapView} db=${db} statsAllYears=${statsAllYears} splitsByTid=${splitsByTid} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
-          : html`<${CompareView} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} clearCompare=${clearCompare} cumIndex=${cumIndex} statsAllYears=${statsAllYears} setSelected=${setSelected} setView=${setView} />`}
+          : html`<${CompareView} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} clearCompare=${clearCompare} cumIndex=${cumIndex} statsAllYears=${statsAllYears} setSelected=${setSelected} setView=${setView} recentCompares=${recentCompares} restoreCompare=${restoreCompare} removeRecentCompare=${removeRecentCompare} />`}
       </div>
     </div>
   `;
