@@ -2629,7 +2629,7 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
       ${otherRecents.length
         ? html`
             <${RecentComparesPanel}
-              title="Bytt til tidligere sammenligning"
+              title=${isMobile ? "Tidligere" : "Bytt til tidligere sammenligning"}
               recents=${otherRecents}
               teams=${teams}
               restoreCompare=${restoreCompare}

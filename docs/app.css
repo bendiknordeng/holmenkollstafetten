@@ -576,6 +576,39 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .recent-compares { padding: 10px 12px; }
   .rc-card { max-width: 220px; }
   .rc-summary { max-width: 180px; font-size: 11.5px; }
+
+  /* Compact horizontal-scroll variant gets even tighter on mobile so it
+     doesn't eat vertical space above the actual compare content. */
+  .recent-compares.compact { padding: 5px 10px 6px; }
+  .recent-compares.compact .rc-title {
+    font-size: 9px;
+    margin-bottom: 4px;
+  }
+  .recent-compares.compact .rc-list { gap: 6px; }
+  .recent-compares.compact .rc-card {
+    max-width: 200px;
+    border-radius: 3px;
+  }
+  .recent-compares.compact .rc-restore {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+  }
+  .recent-compares.compact .rc-count {
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .recent-compares.compact .rc-summary {
+    font-size: 11.5px;
+    max-width: 140px;
+    flex: 0 1 auto;
+  }
+  .recent-compares.compact .rc-years { display: none; }
+  .recent-compares.compact .rc-remove {
+    padding: 0 8px;
+    font-size: 11px;
+  }
 }
 
 .compare-team-list.compact {
