@@ -2652,7 +2652,50 @@ function App() {
     return m;
   }, [db]);
 
-  if (!db) return html`<div className="loading">Laster ~8 MB datasett…</div>`;
+  if (!db) return html`
+    <div className="splash" role="status" aria-live="polite">
+      <div className="splash-card">
+        <div className="splash-brand">HK<em>Split</em></div>
+        <div className="splash-kicker">Holmenkollstafetten · 18,5 km · 15 etapper</div>
+        <svg className="splash-profile" viewBox="0 0 360 80" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="splash-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f4cf3a" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#f4cf3a" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M 0 64 L 24 56 L 48 58 L 72 56 L 96 50 L 120 38 L 144 24 L 168 12 L 192 18 L 216 28 L 240 40 L 264 56 L 288 60 L 312 56 L 336 58 L 360 64 L 360 80 L 0 80 Z"
+            fill="url(#splash-fill)"
+          />
+          <line x1="0" y1="79" x2="360" y2="79" stroke="#3a3324" strokeWidth="1" strokeDasharray="2 4" />
+          <path
+            id="splash-course"
+            className="splash-line"
+            d="M 0 64 L 24 56 L 48 58 L 72 56 L 96 50 L 120 38 L 144 24 L 168 12 L 192 18 L 216 28 L 240 40 L 264 56 L 288 60 L 312 56 L 336 58 L 360 64"
+            fill="none"
+            stroke="#f4cf3a"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          ${[0, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240, 264, 288, 312, 336, 360].map(
+            (x, i) => html`<circle key=${i} cx=${x} cy=${[64,56,58,56,50,38,24,12,18,28,40,56,60,56,58,64][i]} r="1.6" fill="#5e5444" />`,
+          )}
+          <circle className="splash-peak" cx="168" cy="12" r="3" fill="none" stroke="#f4cf3a" strokeWidth="1" />
+          <text x="168" y="6" textAnchor="middle" fontSize="6" fill="#978a72" fontFamily="JetBrains Mono, monospace" letterSpacing="1">BESSERUD</text>
+          <circle className="splash-runner" r="3.2" fill="#f4cf3a">
+            <animateMotion dur="3.4s" repeatCount="indefinite" begin="1.6s">
+              <mpath href="#splash-course" />
+            </animateMotion>
+          </circle>
+        </svg>
+        <div className="splash-status">Laster datasett</div>
+        <div className="splash-bar"><span /></div>
+        <div className="splash-meta">25 566 lag · 382 454 splits · 2019, 2022–2026</div>
+      </div>
+    </div>
+  `;
 
   return html`
     <div className="app">
