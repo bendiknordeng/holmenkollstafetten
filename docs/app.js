@@ -27,17 +27,16 @@ const TEAM_FIELDS = ["tid", "year", "bib", "team", "bedrift", "klasse_id", "tota
 // splits.json: array of [tid, etappe, split_sec, total_sec, runner]
 
 async function loadAll() {
-  const [meta, teams, splits, teamRank, statsOverall, statsKlasse] = await Promise.all(
-    [
-      "data/meta.json",
-      "data/teams.json",
-      "data/splits.json",
-      "data/team_rank.json",
-      "data/stats_overall.json",
-      "data/stats_klasse.json",
-    ].map((u) => fetch(u).then((r) => r.json())),
-  );
-  return { meta, teams, splits, teamRank, statsOverall, statsKlasse };
+  const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes] = await Promise.all([
+    fetch("data/meta.json").then((r) => r.json()),
+    fetch("data/teams.json").then((r) => r.json()),
+    fetch("data/splits.json").then((r) => r.json()),
+    fetch("data/team_rank.json").then((r) => r.json()),
+    fetch("data/stats_overall.json").then((r) => r.json()),
+    fetch("data/stats_klasse.json").then((r) => r.json()),
+    fetch("data/etappe_routes.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+  ]);
+  return { meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes };
 }
 
 // ---- Helpers --------------------------------------------------------------
@@ -2118,13 +2117,23 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
 }
 
 function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtappePreselect }) {
-  const { meta } = db;
+  const { meta, etappeRoutes } = db;
   const coords = meta.etappe_coords || [];
   const [activeEt, setActiveEt] = useState(null);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const segLayerRef = useRef(null);
+  const stageLayersRef = useRef({});
   const markersRef = useRef([]);
+
+  // Resolve per-etappe latlng path: GPX if available, else straight chip-mat line.
+  const stagePath = (e) => {
+    const a = coords[e - 1], b = coords[e];
+    const gpx = etappeRoutes?.[String(e)];
+    if (gpx && gpx.length >= 2) return gpx;
+    if (!a || !b) return null;
+    return [[a.lat, a.lon], [b.lat, b.lon]];
+  };
 
   // Initialize map once
   useEffect(() => {
@@ -2138,17 +2147,27 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       maxZoom: 19,
     }).addTo(map);
 
-    const latlngs = coords.map((c) => [c.lat, c.lon]);
-    if (latlngs.length) {
-      map.fitBounds(latlngs, { padding: [40, 40] });
+    // Per-etappe base polylines (the dim "ribbon" beneath the highlighted active stage).
+    const allPathsForBounds = [];
+    for (let e = 1; e <= 15; e++) {
+      const path = stagePath(e);
+      if (!path) continue;
+      const isApprox = !etappeRoutes?.[String(e)];
+      const layer = L.polyline(path, {
+        color: "#5e5444",
+        weight: 4,
+        opacity: 0.55,
+        dashArray: isApprox ? "6 8" : null,
+      }).addTo(map);
+      layer.on("click", () => setActiveEt(e));
+      stageLayersRef.current[e] = layer;
+      allPathsForBounds.push(...path);
     }
-
-    // Full route polyline
-    L.polyline(latlngs, {
-      color: "#5e5444",
-      weight: 4,
-      opacity: 0.55,
-    }).addTo(map);
+    if (allPathsForBounds.length) {
+      map.fitBounds(allPathsForBounds, { padding: [40, 40] });
+    } else if (coords.length) {
+      map.fitBounds(coords.map((c) => [c.lat, c.lon]), { padding: [40, 40] });
+    }
 
     // Markers
     coords.forEach((c, i) => {
@@ -2181,10 +2200,11 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       map.remove();
       mapRef.current = null;
       markersRef.current = [];
+      stageLayersRef.current = {};
     };
-  }, [coords]);
+  }, [coords, etappeRoutes]);
 
-  // Highlight selected etappe segment
+  // Highlight selected etappe segment with the GPX path (or chip-mat fallback).
   useEffect(() => {
     if (!mapRef.current) return;
     if (segLayerRef.current) {
@@ -2192,24 +2212,17 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       segLayerRef.current = null;
     }
     if (activeEt == null) return;
-    const a = coords[activeEt - 1];
-    const b = coords[activeEt];
-    if (!a || !b) return;
-    segLayerRef.current = L.polyline(
-      [
-        [a.lat, a.lon],
-        [b.lat, b.lon],
-      ],
-      { color: "#f4cf3a", weight: 7, opacity: 0.95 },
-    ).addTo(mapRef.current);
-    mapRef.current.fitBounds(
-      [
-        [a.lat, a.lon],
-        [b.lat, b.lon],
-      ],
-      { padding: [80, 80], maxZoom: 16 },
-    );
-  }, [activeEt, coords]);
+    const path = stagePath(activeEt);
+    if (!path) return;
+    segLayerRef.current = L.polyline(path, {
+      color: "#f4cf3a",
+      weight: 6,
+      opacity: 0.95,
+      lineCap: "round",
+      lineJoin: "round",
+    }).addTo(mapRef.current);
+    mapRef.current.fitBounds(path, { padding: [80, 80], maxZoom: 17 });
+  }, [activeEt, coords, etappeRoutes]);
 
   // Selected etappe quick stats per year
   const stats = useMemo(() => {
