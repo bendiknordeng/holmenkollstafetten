@@ -1959,10 +1959,16 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
   };
 
   return html`
-    <div style=${{ position: "relative", width: isMobile ? "100%" : "auto", flex: isMobile ? "1 1 100%" : undefined, minWidth: 0 }}>
+    <div className="add-team-search" style=${{ width: isMobile ? "100%" : "auto", flex: isMobile ? "1 1 0" : undefined, minWidth: 0 }}>
+      <span className="ats-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="7" cy="7" r="5"/>
+          <line x1="10.6" y1="10.6" x2="14" y2="14"/>
+        </svg>
+      </span>
       <input
         type="text"
-        placeholder=${isMobile ? "Søk og legg til…" : "Søk og legg til (Enter = legg til alle treff)…"}
+        placeholder=${isMobile ? "Søk og legg til lag…" : "Søk og legg til (Enter = legg til alle treff)…"}
         value=${q}
         onInput=${(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus=${() => setOpen(true)}
@@ -1975,8 +1981,16 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
             setOpen(false);
           }
         }}
-        style=${{ width: isMobile ? "100%" : "360px", boxSizing: "border-box" }}
+        style=${{ width: isMobile ? "100%" : "360px" }}
       />
+      ${q
+        ? html`<button
+            type="button"
+            className="ats-clear"
+            onMouseDown=${(e) => { e.preventDefault(); setQ(""); }}
+            aria-label="Tøm søk"
+          >✕</button>`
+        : null}
       ${open && (flatTids.length > 0 || q.length >= 2 || yearSel.length || klasseSel.length)
         ? html`
             <div style=${{
@@ -2503,11 +2517,13 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
       ${compactHeader
         ? html`
             <div className="compare-header compact">
-              <div className="kicker">Sammenligning · ${items.length} lag</div>
-              <div className="compact-actions">
-                <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
-                <button className="subtle danger" onClick=${clearCompare} title="Tøm alle">Tøm</button>
-              </div>
+              <${AddTeamSearch} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} />
+              <button
+                className="icon-btn danger compact-clear"
+                onClick=${clearCompare}
+                title="Tøm alle"
+                aria-label="Tøm alle"
+              >✕</button>
             </div>
           `
         : html`
