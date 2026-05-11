@@ -3187,34 +3187,12 @@ function buildRunnerIndex(db) {
   return m;
 }
 
-function AthleteView({ db, splitsByTid, statsAllYears }) {
+function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersList }) {
   const { meta, statsOverall, etappeGap } = db;
   const isMobile = useIsMobile();
-  const runnerIndex = useMemo(() => buildRunnerIndex(db), [db]);
   const gapFactorOf = useCallback((etappe) => etappeGap?.[String(etappe)]?.factor || null, [etappeGap]);
 
-  const allRunners = useMemo(() => {
-    const out = [];
-    for (const [key, rec] of runnerIndex) {
-      const years = [...new Set(rec.entries.map((e) => e.year))].sort();
-      const etappes = [...new Set(rec.entries.map((e) => e.etappe))].sort((a, b) => a - b);
-      const teams = [...new Set(rec.entries.map((e) => e.team))];
-      const isAmbiguous = rec.display.trim().split(/\s+/).length < 2 || teams.length > 3;
-      out.push({
-        key,
-        display: rec.display,
-        count: rec.entries.length,
-        years,
-        yearMin: years[0],
-        yearMax: years[years.length - 1],
-        etappes,
-        teamCount: teams.length,
-        ambiguous: isAmbiguous,
-      });
-    }
-    out.sort((a, b) => a.display.localeCompare(b.display, "no"));
-    return out;
-  }, [runnerIndex]);
+  const allRunners = allRunnersList;
 
   const [q, setQ] = usePersistedState("hk:athlete:q", "");
   const [selectedKeys, setSelectedKeys] = usePersistedState("hk:athlete:keys", []);
@@ -3653,35 +3631,52 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
     </div>
   `;
 
+  const searchPanel = html`
+    <div className="field">
+      <label>Søk løper</label>
+      <input
+        type="text"
+        placeholder="navn…"
+        value=${q}
+        onInput=${(e) => setQ(e.target.value)}
+        autoFocus=${runnersData.length === 0 && !isMobile}
+      />
+      <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+        ${q.trim() ? `${matches.length.toLocaleString("no")} treff` : `${allRunners.length.toLocaleString("no")} unike navn totalt`}
+        ${runnersData.length > 0 ? html` · klikk = legg til / fjern` : null}
+      </div>
+    </div>
+    <div style=${{
+      flex: isMobile ? "0 1 auto" : 1,
+      maxHeight: isMobile && q.trim() ? "50vh" : undefined,
+      minHeight: 0,
+      overflow: "auto",
+      marginTop: "4px",
+      border: q.trim() ? "1px solid var(--border)" : "none",
+      borderRadius: "4px",
+    }}>
+      ${!q.trim()
+        ? null
+        : matches.length === 0
+        ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
+        : matches.map((r) => {
+            const idx = selectedKeys.indexOf(r.key);
+            return matchListItem(r, idx >= 0, idx);
+          })}
+    </div>
+  `;
+
   return html`
     <${React.Fragment}>
       <div className="sidebar" style=${{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div className="field">
-          <label>Søk løper</label>
-          <input
-            type="text"
-            placeholder="navn…"
-            value=${q}
-            onInput=${(e) => setQ(e.target.value)}
-            autoFocus=${runnersData.length === 0 && !isMobile}
-          />
-          <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
-            ${q.trim() ? `${matches.length.toLocaleString("no")} treff` : `${allRunners.length.toLocaleString("no")} unike navn totalt`}
-            ${runnersData.length > 0 ? html` · klikk = legg til / fjern` : null}
-          </div>
-        </div>
-        <div style=${{ flex: 1, minHeight: 0, overflow: "auto", marginTop: "4px", border: q.trim() ? "1px solid var(--border)" : "none", borderRadius: "4px" }}>
-          ${!q.trim()
-            ? null
-            : matches.length === 0
-            ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
-            : matches.map((r) => {
-                const idx = selectedKeys.indexOf(r.key);
-                return matchListItem(r, idx >= 0, idx);
-              })}
-        </div>
+        ${searchPanel}
       </div>
       <div className="content" style=${{ padding: 0, overflow: "auto" }}>
+        ${isMobile ? html`
+          <div className="athlete-search-mobile" style=${{ padding: "12px", borderBottom: "1px solid var(--border)", background: "var(--bg-2)", display: "flex", flexDirection: "column" }}>
+            ${searchPanel}
+          </div>
+        ` : null}
         ${runnersData.length === 0
           ? emptyState
           : html`
@@ -3817,6 +3812,31 @@ function App() {
     return out;
   }, [db]);
 
+  // Runner index for Atlet view — computed once at App level so tab switches don't rebuild it.
+  const runnerIndex = useMemo(() => (db ? buildRunnerIndex(db) : new Map()), [db]);
+  const allRunnersList = useMemo(() => {
+    const out = [];
+    for (const [key, rec] of runnerIndex) {
+      const years = [...new Set(rec.entries.map((e) => e.year))].sort();
+      const etappes = [...new Set(rec.entries.map((e) => e.etappe))].sort((a, b) => a - b);
+      const teams = [...new Set(rec.entries.map((e) => e.team))];
+      const isAmbiguous = rec.display.trim().split(/\s+/).length < 2 || teams.length > 3;
+      out.push({
+        key,
+        display: rec.display,
+        count: rec.entries.length,
+        years,
+        yearMin: years[0],
+        yearMax: years[years.length - 1],
+        etappes,
+        teamCount: teams.length,
+        ambiguous: isAmbiguous,
+      });
+    }
+    out.sort((a, b) => a.display.localeCompare(b.display, "no"));
+    return out;
+  }, [runnerIndex]);
+
   const sameTeamIndex = useMemo(() => {
     if (!db) return new Map();
     const m = new Map();
@@ -3939,7 +3959,7 @@ function App() {
           : view === "etappesok"
           ? html`<${EtappeSokView} db=${db} splitsByTid=${splitsByTid} setSelected=${setSelected} setView=${setView} statsAllYears=${statsAllYears} compareTids=${compareTids} toggleCompare=${toggleCompare} etappePreselect=${etappePreselect} clearPreselect=${() => setEtappePreselect(null)} />`
           : view === "atlet"
-          ? html`<${AthleteView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} />`
+          ? html`<${AthleteView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} runnerIndex=${runnerIndex} allRunnersList=${allRunnersList} />`
           : view === "rute"
           ? html`<${MapView} db=${db} statsAllYears=${statsAllYears} splitsByTid=${splitsByTid} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
           : html`<${CompareView} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} clearCompare=${clearCompare} cumIndex=${cumIndex} statsAllYears=${statsAllYears} setSelected=${setSelected} setView=${setView} recentCompares=${recentCompares} restoreCompare=${restoreCompare} removeRecentCompare=${removeRecentCompare} />`}
