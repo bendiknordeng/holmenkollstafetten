@@ -24,7 +24,6 @@
   --c-2014: #6b7280;
   --c-2015: #8b90a0;
   --c-2016: #a39e6e;
-  --c-2019: #b78fff;
   --c-2022: #5fa8d3;
   --c-2023: #e2a13c;
   --c-2024: #e4574a;
@@ -161,7 +160,6 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .chip.year-2014 { border-color: var(--c-2014); color: var(--c-2014); }
 .chip.year-2015 { border-color: var(--c-2015); color: var(--c-2015); }
 .chip.year-2016 { border-color: var(--c-2016); color: var(--c-2016); }
-.chip.year-2019 { border-color: var(--c-2019); color: var(--c-2019); }
 .chip.year-2022 { border-color: var(--c-2022); color: var(--c-2022); }
 .chip.year-2023 { border-color: var(--c-2023); color: var(--c-2023); }
 .chip.year-2024 { border-color: var(--c-2024); color: var(--c-2024); }

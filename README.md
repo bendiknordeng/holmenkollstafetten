@@ -1,9 +1,9 @@
 # Holmenkollstafetten DB
 
-> Six years. Twenty-five thousand teams. Three hundred thousand splits.
+> Five years. Twenty-two thousand teams. Three hundred thousand splits.
 > One stubbornly steep climb to Besserud.
 
-A self-hosted analytics dashboard for **Holmenkollstafetten** — Oslo's 18.5 km, 15-leg relay across the city — covering 2019, 2022–2026.
+A self-hosted analytics dashboard for **Holmenkollstafetten** — Oslo's 18.5 km, 15-leg relay across the city — covering 2022–2026.
 
 | #  | Leg                                  | Distance | Profile          |
 |---:|--------------------------------------|---------:|------------------|
@@ -48,16 +48,15 @@ Live: **[bendiknordeng.github.io/holmenkollstafetten](https://bendiknordeng.gith
 
 | Year | Teams | Splits |
 |-----:|------:|-------:|
-| 2019 | 3 467 | 51 994 |
 | 2022 | 3 149 | 47 163 |
 | 2023 | 4 093 | 61 372 |
 | 2024 | 4 708 | 70 426 |
 | 2025 | 4 955 | 74 242 |
 | 2026 | 5 194 | 77 257 |
-| **Σ** | **25 566** | **382 454** |
+| **Σ** | **22 099** | **330 460** |
 
 > 2014–2016 deliberately excluded: the leg 14/15 finish moved from Maratonporten to Bislettgata, so splits aren't comparable to the modern course.
-> 2020–2021 cancelled due to COVID.
+> 2019 excluded; 2020–2021 cancelled due to COVID.
 
 ## Stack
 

@@ -338,7 +338,7 @@ function Topbar({ view, setView, n, compareCount, hasSidebar, sidebarOpen, setSi
           </svg>
         </button>
       ` : null}
-      <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2019–2026</span></h1>
+      <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2022–2026</span></h1>
       <div className="spacer"></div>
       <div className="tabs">
         <button className=${view === "teams" ? "active" : ""} onClick=${() => setView("teams")}>Lag</button>
@@ -3145,7 +3145,7 @@ function App() {
         </svg>
         <div className="splash-status">Laster datasett</div>
         <div className="splash-bar"><span /></div>
-        <div className="splash-meta">25 566 lag · 382 454 splits · 2019, 2022–2026</div>
+        <div className="splash-meta">22 099 lag · 330 460 splits · 2022–2026</div>
       </div>
     </div>
   `;
