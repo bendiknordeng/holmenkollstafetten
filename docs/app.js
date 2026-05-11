@@ -3046,12 +3046,30 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
 
   const [q, setQ] = usePersistedState("hk:athlete:q", "");
   const [selectedKey, setSelectedKey] = usePersistedState("hk:athlete:key", null);
-  const [compareKey, setCompareKey] = usePersistedState("hk:athlete:compareKey", null);
+  const [compareKeys, setCompareKeys] = usePersistedState("hk:athlete:compareKeys", []);
   const [teamFilter, setTeamFilter] = useState(null);
-  const [pickingCompare, setPickingCompare] = useState(false);
 
   // Reset team filter when athlete changes.
   useEffect(() => { setTeamFilter(null); }, [selectedKey]);
+
+  // Drop comparisons for athletes whose entries no longer exist in the index
+  // (data reload, runner removed, etc.). Doesn't fire on normal pick — selectPrimary
+  // already prunes the picked key from the list.
+  useEffect(() => {
+    if (!compareKeys.length) return;
+    const valid = compareKeys.filter((k) => runnerIndex.has(k));
+    if (valid.length !== compareKeys.length) setCompareKeys(valid);
+  }, [compareKeys, runnerIndex, setCompareKeys]);
+
+  const toggleCompare = useCallback((key) => {
+    if (key === selectedKey) return;
+    setCompareKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+  }, [selectedKey, setCompareKeys]);
+
+  const selectPrimary = useCallback((key) => {
+    setSelectedKey(key);
+    setCompareKeys((cur) => cur.filter((k) => k !== key));
+  }, [setSelectedKey, setCompareKeys]);
 
   const matches = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -3069,7 +3087,13 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
   }, [q, allRunners]);
 
   const selected = selectedKey ? runnerIndex.get(selectedKey) : null;
-  const compare = compareKey && compareKey !== selectedKey ? runnerIndex.get(compareKey) : null;
+  const comparedRunners = useMemo(() => {
+    if (!selectedKey) return [];
+    return compareKeys
+      .filter((k) => k !== selectedKey)
+      .map((k) => ({ key: k, runner: runnerIndex.get(k) }))
+      .filter((c) => c.runner != null);
+  }, [compareKeys, selectedKey, runnerIndex]);
 
   // Within selected runner: derive team list for filter chips.
   const selectedTeams = useMemo(() => {
@@ -3142,34 +3166,65 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
     return out;
   }, [selectedRows]);
 
-  // Comparison data — both athletes' splits keyed by (year, etappe).
-  const compareRows = useMemo(() => {
-    if (!compare) return [];
-    return compare.entries.map((e) => {
-      const dist = meta.etappe_distances?.[e.etappe];
-      const sk = `${e.year}-${e.etappe}`;
-      const stat = statsOverall[sk];
-      const pctYear = stat ? percentileOf(stat.sorted, e.split) : null;
-      const allArr = statsAllYears?.[e.etappe];
-      const pctAll = allArr ? percentileOf(allArr, e.split) : null;
-      return { ...e, dist, pctYear, pctAll };
-    });
-  }, [compare, meta, statsOverall, statsAllYears]);
+  // Enrich entries for every compared runner with dist / percentiles.
+  const enrichEntries = useCallback((entries) => entries.map((e) => {
+    const dist = meta.etappe_distances?.[e.etappe];
+    const sk = `${e.year}-${e.etappe}`;
+    const stat = statsOverall[sk];
+    const pctYear = stat ? percentileOf(stat.sorted, e.split) : null;
+    const allArr = statsAllYears?.[e.etappe];
+    const pctAll = allArr ? percentileOf(allArr, e.split) : null;
+    return { ...e, dist, pctYear, pctAll };
+  }), [meta, statsOverall, statsAllYears]);
 
-  // Head-to-head: same etappe (any year), best split each.
+  const compareData = useMemo(() => {
+    return comparedRunners.map((c, i) => ({
+      key: c.key,
+      runner: c.runner,
+      display: c.runner.display,
+      color: colorForCompareIdx(i + 1),
+      rows: enrichEntries(c.runner.entries),
+    }));
+  }, [comparedRunners, enrichEntries]);
+
+  // Per-etappe best split for selected + each compared (across any year).
   const headToHead = useMemo(() => {
-    if (!compare || !selected) return [];
+    if (!selected || !compareData.length) return [];
+    const all = [{ key: selectedKey, display: selected.display, rows: selectedRows, color: COMPARE_PALETTE[0] }, ...compareData];
     const out = [];
     for (let e = 1; e <= 15; e++) {
-      const mineRows = selectedRows.filter((r) => r.etappe === e);
-      const theirsRows = compareRows.filter((r) => r.etappe === e);
-      if (!mineRows.length || !theirsRows.length) continue;
-      const mineBest = mineRows.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
-      const theirsBest = theirsRows.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
-      out.push({ etappe: e, mine: mineBest, theirs: theirsBest, diff: mineBest.split - theirsBest.split });
+      const perRunner = all.map((a) => {
+        const rs = a.rows.filter((r) => r.etappe === e);
+        if (!rs.length) return null;
+        const best = rs.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
+        return { key: a.key, display: a.display, color: a.color, best };
+      });
+      const present = perRunner.filter(Boolean);
+      if (!present.length) continue;
+      out.push({ etappe: e, runners: perRunner, present });
     }
     return out;
-  }, [selected, compare, selectedRows, compareRows]);
+  }, [selected, selectedKey, selectedRows, compareData]);
+
+  // Best percentile per etappe per runner — used for comparison line chart.
+  const compareBestPctData = useMemo(() => {
+    if (!selected || !compareData.length) return [];
+    const all = [{ key: selectedKey, rows: selectedRows }, ...compareData.map((c) => ({ key: c.key, rows: c.rows }))];
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      const row = { etappe: e };
+      let any = false;
+      for (const a of all) {
+        const pcts = a.rows.filter((r) => r.etappe === e && r.pctAll != null).map((r) => r.pctAll);
+        if (pcts.length) {
+          row[`k_${a.key}`] = Math.min(...pcts);
+          any = true;
+        }
+      }
+      if (any) out.push(row);
+    }
+    return out;
+  }, [selected, selectedKey, selectedRows, compareData]);
 
   const yearsInUse = useMemo(() => {
     if (!selectedRows.length) return [];
@@ -3181,34 +3236,51 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
     2022: "#5fa8d3", 2023: "#e2a13c", 2024: "#e4574a", 2025: "#6cc270", 2026: "#f4cf3a",
   }[y] || "#f4cf3a");
 
-  const matchListItem = (r, isSelectedRow, isCompareRow, onClick) => html`
-    <div
-      key=${r.key}
-      onClick=${onClick}
-      className=${"runner-match" + (isSelectedRow ? " selected" : "") + (isCompareRow ? " compared" : "")}
-      style=${{
-        padding: "8px 12px",
-        borderBottom: "1px solid var(--border)",
-        cursor: "pointer",
-        background: isSelectedRow ? "rgba(244,207,58,0.10)" : isCompareRow ? "rgba(108,194,112,0.08)" : "transparent",
-        borderLeft: isSelectedRow ? "2px solid var(--accent)" : isCompareRow ? "2px solid var(--good)" : "2px solid transparent",
-      }}
-    >
-      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px" }}>
-        <span style=${{ fontWeight: 600, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          ${r.display}
-          ${r.ambiguous ? html`<span title="Vanlig fornavn eller mange lag — kan være flere personer" style=${{ marginLeft: "6px", fontSize: "10px", color: "var(--muted)", fontWeight: 400 }}>⚠</span>` : null}
-        </span>
-        <span style=${{ fontSize: "11px", color: "var(--muted)", fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>${r.count}×</span>
+  const matchListItem = (r, isSelectedRow, compareIdx, onSelect, onToggleCompare) => {
+    const isCompareRow = compareIdx >= 0;
+    const compareColor = isCompareRow ? colorForCompareIdx(compareIdx + 1) : null;
+    return html`
+      <div
+        key=${r.key}
+        className=${"runner-match" + (isSelectedRow ? " selected" : "") + (isCompareRow ? " compared" : "")}
+        style=${{
+          padding: "8px 12px",
+          borderBottom: "1px solid var(--border)",
+          background: isSelectedRow ? "rgba(244,207,58,0.10)" : isCompareRow ? "rgba(108,194,112,0.08)" : "transparent",
+          borderLeft: isSelectedRow ? `2px solid ${COMPARE_PALETTE[0]}` : isCompareRow ? `2px solid ${compareColor}` : "2px solid transparent",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        <div
+          onClick=${(e) => { e.stopPropagation(); if (!isSelectedRow) onToggleCompare(); }}
+          style=${{ flexShrink: 0 }}
+          title=${isSelectedRow ? "Valgt løper" : isCompareRow ? "Fjern fra sammenligning" : "Legg til i sammenligning"}
+        >
+          <span
+            className=${"compare-toggle" + (isCompareRow ? " on" : "")}
+            style=${isSelectedRow ? { background: COMPARE_PALETTE[0], borderColor: COMPARE_PALETTE[0], color: "var(--bg)", cursor: "default" } : isCompareRow ? { background: compareColor, borderColor: compareColor, color: "var(--bg)" } : null}
+          >${isSelectedRow ? "●" : isCompareRow ? "✓" : "+"}</span>
+        </div>
+        <div onClick=${onSelect} style=${{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+          <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px" }}>
+            <span style=${{ fontWeight: 600, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              ${r.display}
+              ${r.ambiguous ? html`<span title="Vanlig fornavn eller mange lag — kan være flere personer" style=${{ marginLeft: "6px", fontSize: "10px", color: "var(--muted)", fontWeight: 400 }}>⚠</span>` : null}
+            </span>
+            <span style=${{ fontSize: "11px", color: "var(--muted)", fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>${r.count}×</span>
+          </div>
+          <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", display: "flex", gap: "8px" }}>
+            <span>${r.yearMin === r.yearMax ? r.yearMin : `${r.yearMin}–${r.yearMax}`}</span>
+            <span>·</span>
+            <span>${r.etappes.length} etappe${r.etappes.length > 1 ? "r" : ""}</span>
+            ${r.teamCount > 1 ? html`<span>·</span><span>${r.teamCount} lag</span>` : null}
+          </div>
+        </div>
       </div>
-      <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", display: "flex", gap: "8px" }}>
-        <span>${r.yearMin === r.yearMax ? r.yearMin : `${r.yearMin}–${r.yearMax}`}</span>
-        <span>·</span>
-        <span>${r.etappes.length} etappe${r.etappes.length > 1 ? "r" : ""}</span>
-        ${r.teamCount > 1 ? html`<span>·</span><span>${r.teamCount} lag</span>` : null}
-      </div>
-    </div>
-  `;
+    `;
+  };
 
   const profile = (selected && stats) ? html`
     <div className="detail" style=${{ margin: isMobile ? 0 : "12px", borderRadius: isMobile ? 0 : undefined }}>
@@ -3226,10 +3298,29 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
           </div>
         </div>
         <div style=${{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          ${!compareKey
-            ? html`<button className=${pickingCompare ? "primary" : "subtle"} onClick=${() => setPickingCompare((s) => !s)}>${pickingCompare ? "Velg en til i lista" : "+ Sammenlign med …"}</button>`
-            : html`<button className="subtle" onClick=${() => { setCompareKey(null); setPickingCompare(false); }}>✕ Avslutt sammenligning</button>`}
+          ${compareKeys.length > 0
+            ? html`<button className="subtle" onClick=${() => setCompareKeys([])}>✕ Tøm sammenligning</button>`
+            : null}
           <button className="subtle" onClick=${() => setSelectedKey(null)}>Lukk ✕</button>
+        </div>
+      </div>
+
+      <div className="compare-team-list" style=${{ margin: "10px 0 0 0", padding: "10px 12px", borderRadius: "4px", border: "1px solid var(--border)", background: "var(--bg-2)" }}>
+        <div className="compare-team-card" style=${{ "--swatch": COMPARE_PALETTE[0] }}>
+          <span className="name">${selected.display}</span>
+          <span className="y">${stats.starts}×</span>
+        </div>
+        ${comparedRunners.map((c, i) => html`
+          <div className="compare-team-card" key=${c.key} style=${{ "--swatch": colorForCompareIdx(i + 1) }}>
+            <span className="name">${c.runner.display}</span>
+            <span className="y">${c.runner.entries.length}×</span>
+            <span className="x" title="Fjern fra sammenligning" onClick=${() => toggleCompare(c.key)}>✕</span>
+          </div>
+        `)}
+        <div style=${{ fontSize: "11px", color: "var(--muted)", alignSelf: "center", marginLeft: "auto" }}>
+          ${comparedRunners.length === 0
+            ? html`<span>Trykk <span className="compare-toggle" style=${{ width: "16px", height: "16px", fontSize: "10px", display: "inline-flex", verticalAlign: "middle" }}>+</span> i lista for å legge til flere</span>`
+            : `${comparedRunners.length} til sammenligning`}
         </div>
       </div>
 
@@ -3313,6 +3404,71 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
               </tbody>
             </table>
           `}
+
+      ${compareData.map((cd) => html`
+        <div key=${cd.key} style=${{ marginTop: "20px", paddingTop: "16px", borderTop: `1px dashed var(--border)` }}>
+          <div style=${{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+            <span style=${{ width: "10px", height: "10px", borderRadius: "50%", background: cd.color, flexShrink: 0 }}></span>
+            <h3 style=${{ margin: 0, fontFamily: "Fraunces, Georgia, serif", fontSize: "18px" }}>${cd.display}</h3>
+            <span style=${{ fontSize: "12px", color: "var(--muted)" }}>${cd.rows.length} ${cd.rows.length === 1 ? "start" : "starter"}</span>
+            <button className="subtle" style=${{ marginLeft: "auto", fontSize: "11px" }} onClick=${() => toggleCompare(cd.key)} title="Fjern fra sammenligning">✕</button>
+          </div>
+          ${isMobile
+            ? html`
+                <div className="etappe-cards">
+                  ${cd.rows.map((r) => html`
+                    <div className="etappe-card" key=${r.tid + "-" + r.etappe} style=${{ borderLeft: `2px solid ${cd.color}` }}>
+                      <div className="etappe-card-head">
+                        <div className="etappe-card-num">${r.etappe}</div>
+                        <div className="etappe-card-title">
+                          <div className="etappe-card-name">${ETAPPE_NAMES[r.etappe]}</div>
+                          <div className="etappe-card-runner"><span className=${"chip year-" + r.year}>${r.year}</span> ${r.team}</div>
+                        </div>
+                        <div className="etappe-card-time">
+                          <div className="t">${fmtTime(r.split)}</div>
+                          <div className="p">${fmtPace(r.split, r.dist)}${r.dist ? ` · ${r.dist} m` : ""}</div>
+                        </div>
+                      </div>
+                      <div className="etappe-card-stats">
+                        <div className="s"><div className="lbl">Pct ${r.year}</div><div className="val">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</div></div>
+                        <div className="s"><div className="lbl">Pct alle år</div><div className="val">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</div></div>
+                      </div>
+                    </div>
+                  `)}
+                </div>
+              `
+            : html`
+                <table className="etappes-table">
+                  <thead>
+                    <tr>
+                      <th>År</th>
+                      <th>Etappe</th>
+                      <th>Lag</th>
+                      <th className="right">Dist.</th>
+                      <th className="right">Tid</th>
+                      <th className="right">Pace</th>
+                      <th className="right">Pct året</th>
+                      <th className="right">Pct alle år</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${cd.rows.map((r) => html`
+                      <tr key=${r.tid + "-" + r.etappe}>
+                        <td><span className=${"chip year-" + r.year}>${r.year}</span></td>
+                        <td>${r.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe]}</span></td>
+                        <td className="team-name">${r.team}${r.bedrift ? html` <span style=${{ color: "var(--muted)" }}>· ${r.bedrift}</span>` : null}</td>
+                        <td className="right muted" style=${{ fontSize: "12px" }}>${r.dist ? r.dist + " m" : "—"}</td>
+                        <td className="right">${fmtTime(r.split)}</td>
+                        <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split, r.dist)}</td>
+                        <td className="right">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</td>
+                        <td className="right">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</td>
+                      </tr>
+                    `)}
+                  </tbody>
+                </table>
+              `}
+        </div>
+      `)}
     </div>
     ${yearsInUse.length > 0 ? html`
       <div className="chart-wrap">
@@ -3386,50 +3542,106 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
       </div>
     ` : null}
 
-    ${compare && headToHead.length ? html`
-      <div className="chart-wrap">
-        <h3>Hode-mot-hode: ${selected.display} vs ${compare.display}</h3>
-        <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste tid hver løper har på hver etappe (alle år). Negativ = ${selected.display} raskere.</div>
-        <${ResponsiveContainer} width="100%" height=${280}>
-          <${BarChart} data=${headToHead.map((h) => ({ etappe: h.etappe, mine: h.mine.split, theirs: h.theirs.split, diff: h.diff }))} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
-            <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
-            <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} />
-            <${YAxis} stroke="#8b949e" fontSize=${12} tickFormatter=${(v) => fmtTime(v)} />
-            <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => fmtTime(v)} />
-            <${Legend} />
-            <${Bar} dataKey="mine" name=${selected.display} fill="#f4cf3a" />
-            <${Bar} dataKey="theirs" name=${compare.display} fill="#6cc270" />
+    ${comparedRunners.length > 0 && headToHead.length ? (() => {
+      const allRunners = [
+        { key: selectedKey, display: selected.display, color: COMPARE_PALETTE[0] },
+        ...compareData.map((c) => ({ key: c.key, display: c.display, color: c.color })),
+      ];
+      const chartData = headToHead.map((h) => {
+        const row = { etappe: h.etappe };
+        for (const r of h.runners) {
+          if (r) row[`k_${r.key}`] = r.best.split;
+        }
+        return row;
+      });
+      return html`
+        <div className="chart-wrap">
+          <h3>Hode-mot-hode${comparedRunners.length > 1 ? ` (${allRunners.length} løpere)` : ""}</h3>
+          <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste tid hver løper har på hver etappe (alle år). "—" = ikke løpt.</div>
+          <${ResponsiveContainer} width="100%" height=${280}>
+            <${BarChart} data=${chartData} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+              <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} />
+              <${YAxis} stroke="#8b949e" fontSize=${12} tickFormatter=${(v) => fmtTime(v)} />
+              <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => fmtTime(v)} />
+              <${Legend} />
+              ${allRunners.map((a) => html`<${Bar} key=${a.key} dataKey=${`k_${a.key}`} name=${a.display} fill=${a.color} />`)}
+            <//>
           <//>
-        <//>
-        <table className="etappes-table" style=${{ marginTop: "12px" }}>
-          <thead>
-            <tr>
-              <th>Etappe</th>
-              <th className="right">${selected.display}</th>
-              <th className="right">${compare.display}</th>
-              <th className="right">Diff</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${headToHead.map((h) => html`
-              <tr key=${h.etappe}>
-                <td>${h.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[h.etappe]}</span></td>
-                <td className="right">${fmtTime(h.mine.split)} <span style=${{ color: "var(--muted)", fontSize: "11px" }}>(${h.mine.year})</span></td>
-                <td className="right">${fmtTime(h.theirs.split)} <span style=${{ color: "var(--muted)", fontSize: "11px" }}>(${h.theirs.year})</span></td>
-                <td className="right" style=${{ color: h.diff < 0 ? "var(--good)" : h.diff > 0 ? "var(--bad)" : undefined, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>${h.diff > 0 ? "+" : ""}${h.diff.toFixed(0)}s</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-    ` : null}
+          <div style=${{ overflowX: "auto", marginTop: "12px" }}>
+            <table className="etappes-table">
+              <thead>
+                <tr>
+                  <th>Etappe</th>
+                  ${allRunners.map((a) => html`
+                    <th key=${a.key} className="right" style=${{ borderBottom: `2px solid ${a.color}` }}>${a.display}</th>
+                  `)}
+                  ${allRunners.length === 2 ? html`<th className="right">Diff</th>` : null}
+                </tr>
+              </thead>
+              <tbody>
+                ${headToHead.map((h) => {
+                  const byKey = new Map(h.runners.filter(Boolean).map((r) => [r.key, r]));
+                  const fastest = h.present.reduce((b, r) => (b == null || r.best.split < b.best.split ? r : b), null);
+                  let diffCell = null;
+                  if (allRunners.length === 2) {
+                    const a0 = byKey.get(allRunners[0].key);
+                    const a1 = byKey.get(allRunners[1].key);
+                    if (a0 && a1) {
+                      const diff = a0.best.split - a1.best.split;
+                      diffCell = html`<td className="right" style=${{ color: diff < 0 ? "var(--good)" : diff > 0 ? "var(--bad)" : undefined, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>${diff > 0 ? "+" : ""}${diff.toFixed(0)}s</td>`;
+                    } else {
+                      diffCell = html`<td className="right muted">—</td>`;
+                    }
+                  }
+                  return html`
+                    <tr key=${h.etappe}>
+                      <td>${h.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[h.etappe]}</span></td>
+                      ${allRunners.map((a) => {
+                        const r = byKey.get(a.key);
+                        if (!r) return html`<td key=${a.key} className="right muted">—</td>`;
+                        const isFastest = fastest && r.key === fastest.key && h.present.length > 1;
+                        return html`
+                          <td key=${a.key} className="right" style=${{ fontWeight: isFastest ? 700 : undefined, color: isFastest ? a.color : undefined }}>
+                            ${fmtTime(r.best.split)} <span style=${{ color: "var(--muted)", fontSize: "11px", fontWeight: 400 }}>(${r.best.year})</span>
+                          </td>
+                        `;
+                      })}
+                      ${diffCell}
+                    </tr>
+                  `;
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        ${compareBestPctData.length ? html`
+          <div className="chart-wrap">
+            <h3>Beste percentil per etappe</h3>
+            <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste prestasjon hver løper har på etappen (alle år, mot hele datasettet). Lavere = bedre.</div>
+            <${ResponsiveContainer} width="100%" height=${260}>
+              <${LineChart} data=${compareBestPctData} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+                <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} type="number" domain=${[1, 15]} ticks=${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]} />
+                <${YAxis} stroke="#8b949e" fontSize=${12} reversed=${true} domain=${[0, 100]} tickFormatter=${(v) => v + "%"} />
+                <${ReferenceLine} y=${50} stroke="#5e5444" strokeDasharray="2 4" />
+                <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => v + "%"} />
+                <${Legend} />
+                ${allRunners.map((a) => html`<${Line} key=${a.key} type="monotone" dataKey=${`k_${a.key}`} name=${a.display} stroke=${a.color} strokeWidth=${2} connectNulls=${true} dot=${{ r: 4 }} />`)}
+              <//>
+            <//>
+          </div>
+        ` : null}
+      `;
+    })() : null}
   ` : null;
 
   const emptyState = html`
     <div style=${{ padding: "32px 20px", color: "var(--muted)", fontSize: "14px", maxWidth: "520px" }}>
       <div style=${{ fontFamily: "Fraunces, Georgia, serif", fontSize: "20px", color: "var(--text)", marginBottom: "8px" }}>Søk etter en løper</div>
       <p>Skriv inn et navn i søkefeltet. Cirka halvparten av løperne i datasettet har registrert navn (2022–2026). Vanlige fornavn kan tilhøre flere personer — bruk lag-filter på profilen for å skille.</p>
-      <p style=${{ marginTop: "12px" }}>Når en løper er valgt får du: percentil pr. etappe, utvikling over år, og du kan sammenligne med en annen løper.</p>
+      <p style=${{ marginTop: "12px" }}>Når en løper er valgt får du: percentil pr. etappe, utvikling over år, og du kan legge til andre løpere som sammenligning via <span className="compare-toggle" style=${{ width: "16px", height: "16px", fontSize: "10px", display: "inline-flex", verticalAlign: "middle" }}>+</span>-knappen i søkelista.</p>
     </div>
   `;
 
@@ -3437,7 +3649,7 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
     <${React.Fragment}>
       <div className="sidebar" style=${{ display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div className="field">
-          <label>Søk løper ${pickingCompare ? html`<span style=${{ color: "var(--good)" }}>(velger sammenligning)</span>` : null}</label>
+          <label>Søk løper</label>
           <input
             type="text"
             placeholder="navn…"
@@ -3447,6 +3659,7 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
           />
           <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
             ${q.trim() ? `${matches.length.toLocaleString("no")} treff` : `${allRunners.length.toLocaleString("no")} unike navn totalt`}
+            ${selected ? html` · klikk navn = velg, <span className="compare-toggle" style=${{ width: "14px", height: "14px", fontSize: "10px", display: "inline-flex", verticalAlign: "middle" }}>+</span> = sammenlign` : null}
           </div>
         </div>
         <div style=${{ flex: 1, minHeight: 0, overflow: "auto", marginTop: "4px", border: q.trim() ? "1px solid var(--border)" : "none", borderRadius: "4px" }}>
@@ -3454,21 +3667,17 @@ function AthleteView({ db, splitsByTid, statsAllYears }) {
             ? null
             : matches.length === 0
             ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
-            : matches.map((r) =>
-                matchListItem(
+            : matches.map((r) => {
+                const isSelected = r.key === selectedKey;
+                const compareIdx = compareKeys.indexOf(r.key);
+                return matchListItem(
                   r,
-                  r.key === selectedKey,
-                  r.key === compareKey,
-                  () => {
-                    if (pickingCompare && r.key !== selectedKey) {
-                      setCompareKey(r.key);
-                      setPickingCompare(false);
-                    } else {
-                      setSelectedKey(r.key);
-                    }
-                  },
-                ),
-              )}
+                  isSelected,
+                  compareIdx,
+                  () => selectPrimary(r.key),
+                  () => toggleCompare(r.key),
+                );
+              })}
         </div>
       </div>
       <div className="content" style=${{ padding: 0, overflow: "auto" }}>
