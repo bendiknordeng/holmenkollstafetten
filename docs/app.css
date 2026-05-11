@@ -169,7 +169,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 /* ============ TABLES ============ */
 .table-wrap { display: flex; flex-direction: column; height: 100%; }
 .table-header, .table-row { display: grid; gap: 8px; padding: 0 12px; align-items: center; height: var(--row-h); border-bottom: 1px solid var(--border); }
-.table-header { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; cursor: pointer; user-select: none; flex-shrink: 0; background: var(--bg-2); border-bottom: 1px solid var(--border-strong); height: 32px; }
+.table-header { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; cursor: pointer; user-select: none; flex-shrink: 0; background: var(--bg-2); border-bottom: 1px solid var(--border-strong); height: 32px; padding-right: calc(12px + var(--sb-w, 0px)); min-width: 0; }
+.table-header > div { min-width: 0; }
+.table-header > div.right { text-align: right; }
 .table-header > div:hover { color: var(--accent); }
 .table-row { cursor: pointer; transition: background 80ms ease; font-size: 13px; }
 .table-row:hover { background: rgba(244,207,58,0.04); }
@@ -186,6 +188,83 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 /* ============ DETAIL PANEL ============ */
 .detail { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 16px; }
+.etappes-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.etappes-table th.sortable:hover { color: var(--accent); background: rgba(244,207,58,0.04); }
+.etappes-table th.sortable .sort-arrow {
+  display: inline-block;
+  width: 10px;
+  margin-left: 4px;
+  font-size: 9px;
+  color: var(--muted);
+  opacity: 0.4;
+  text-align: center;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.etappes-table th.sortable:hover .sort-arrow { opacity: 1; }
+.etappes-table th.sortable.active { color: var(--accent); }
+.etappes-table th.sortable.active .sort-arrow { color: var(--accent); opacity: 1; }
+.etappes-table th.right.sortable { text-align: right; }
+
+.gap-info { position: relative; display: inline-flex; align-items: baseline; gap: 4px; cursor: help; }
+.gap-info .icon { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; }
+.gap-info .tip {
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: "DM Sans", sans-serif;
+  width: 260px;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.gap-info .tip strong { color: var(--accent); font-weight: 700; }
+.gap-info:hover .tip, .gap-info:focus-within .tip { opacity: 1; }
+.gap-info.below .tip { bottom: auto; top: calc(100% + 6px); }
+.gap-info.right .tip { left: auto; right: 0; transform: none; }
+
+.athlete-strip-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.athlete-strip {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 8px 18px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--swatch);
+  border-radius: 4px;
+}
+.athlete-strip-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.athlete-strip-name .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.athlete-strip-name .display { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.athlete-strip-name .x-btn { padding: 2px 6px; min-height: 24px; line-height: 1; }
+.athlete-strip-kpis { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.athlete-strip-kpis .kpi { display: flex; flex-direction: column; gap: 2px; min-width: 50px; }
+.athlete-strip-kpis .kpi .lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+.athlete-strip-kpis .kpi .val { font-size: 14px; font-weight: 700; font-family: "JetBrains Mono", monospace; font-feature-settings: "tnum"; }
+.athlete-strip-empty { color: var(--muted); font-size: 12px; }
+.athlete-strip-teams { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 6px; border-top: 1px dashed var(--border); }
+.athlete-strip-teams .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
+@media (max-width: 820px) {
+  .athlete-strip { grid-template-columns: 1fr; padding: 10px 12px; gap: 8px; }
+  .athlete-strip-kpis { gap: 12px; }
+  .athlete-strip-kpis .kpi .val { font-size: 13px; }
+}
 .detail h2 { margin: 0 0 6px; font-family: "Fraunces", Georgia, serif; font-weight: 700; font-size: 24px; letter-spacing: -0.01em; line-height: 1.1; font-variation-settings: "opsz" 96; }
 .detail .sub { color: var(--muted); margin-bottom: 16px; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .detail .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 18px; }
@@ -338,9 +417,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 .col-filter-trigger {
   display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-  padding: 2px 6px; border-radius: 3px; user-select: none;
+  padding: 2px 6px; margin-left: -6px; border-radius: 3px; user-select: none;
   transition: all 100ms ease;
 }
+.table-header > div.right .col-filter-trigger { margin-left: 0; margin-right: -6px; }
 .col-filter-trigger:hover { background: var(--panel); color: var(--accent); }
 .col-filter-trigger.active { color: var(--accent); }
 .col-filter-trigger .arrow { font-size: 9px; opacity: 0.6; }
