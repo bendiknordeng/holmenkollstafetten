@@ -212,7 +212,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
   z-index: 50;
   bottom: calc(100% + 6px);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + var(--tip-shift, 0px)));
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -224,7 +224,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
   letter-spacing: 0;
   text-transform: none;
   font-family: "DM Sans", sans-serif;
-  width: 260px;
+  width: min(260px, calc(100vw - 24px));
   text-align: left;
   white-space: normal;
   opacity: 0;
@@ -235,7 +235,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .gap-info .tip strong { color: var(--accent); font-weight: 700; }
 .gap-info:hover .tip, .gap-info:focus-within .tip { opacity: 1; }
 .gap-info.below .tip { bottom: auto; top: calc(100% + 6px); }
-.gap-info.right .tip { left: auto; right: 0; transform: none; }
+.gap-info.right .tip { left: auto; right: 0; transform: translateX(var(--tip-shift, 0px)); }
 
 .athlete-strip-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .athlete-strip {

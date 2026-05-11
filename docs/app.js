@@ -42,6 +42,33 @@ const TEAM_FIELDS = ["tid", "year", "bib", "team", "bedrift", "klasse_id", "tota
   document.documentElement.style.setProperty("--sb-w", `${w}px`);
 })();
 
+// Keep .gap-info tooltips inside the viewport on narrow screens. The tip is
+// centered on its trigger by default; if the trigger sits near a viewport
+// edge, the 260px tip overflows. We measure on hover/focus and write a
+// CSS custom property --tip-shift that the .tip transform consumes.
+(function setupTooltipPositioning() {
+  if (typeof window === "undefined") return;
+  const MARGIN = 12;
+  function adjust(trigger) {
+    const tip = trigger.querySelector(":scope > .tip");
+    if (!tip) return;
+    trigger.style.setProperty("--tip-shift", "0px");
+    const rect = tip.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    let shift = 0;
+    if (rect.right > vw - MARGIN) shift = -(rect.right - (vw - MARGIN));
+    else if (rect.left < MARGIN) shift = MARGIN - rect.left;
+    if (shift) trigger.style.setProperty("--tip-shift", `${shift}px`);
+  }
+  function handler(e) {
+    const t = e.target?.closest?.(".gap-info");
+    if (t) adjust(t);
+  }
+  document.addEventListener("mouseenter", handler, true);
+  document.addEventListener("focusin", handler);
+  document.addEventListener("touchstart", handler, { passive: true, capture: true });
+})();
+
 async function loadAll() {
   const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation] = await Promise.all([
     fetch("data/meta.json").then((r) => r.json()),
@@ -720,6 +747,28 @@ function TeamsView({ db, filters, setFilters, selected, setSelected, compareTids
 
   return html`
     <div className="content" style=${{ padding: 0 }}>
+      ${isMobile ? html`
+        <div
+          className="field mobile-inline-search"
+          style=${{
+            margin: 0,
+            padding: "10px 12px",
+            background: "var(--bg-2)",
+            borderBottom: "1px solid var(--border)",
+            position: "sticky",
+            top: 0,
+            zIndex: 4,
+            gap: "4px",
+          }}
+        >
+          <input
+            type="text"
+            placeholder=${filters.qField === "team" ? "Søk lagnavn…" : filters.qField === "bedrift" ? "Søk bedrift…" : "Søk lag eller bedrift…"}
+            value=${(filters.q && filters.q[0]) || ""}
+            onInput=${(e) => setFilters({ ...filters, q: e.target.value ? [e.target.value] : [] })}
+          />
+        </div>
+      ` : null}
       <div className="table-wrap">
         <div className="table-header" style=${{ gridTemplateColumns: cols, overflow: "visible", display: isMobile ? "none" : undefined }}>
           <div>
@@ -1861,7 +1910,7 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
       <div className="content" style=${{ padding: 0, display: "flex", flexDirection: "column" }}>
         ${isMobile ? html`
           <div
-            className="field"
+            className="mobile-inline-search"
             style=${{
               margin: 0,
               padding: "10px 12px",
@@ -1870,11 +1919,21 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
               position: "sticky",
               top: 0,
               zIndex: 4,
-              gap: "4px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
             }}
           >
-            <label style=${{ margin: 0 }}>Etappe</label>
-            ${etappeSelect}
+            <div className="field" style=${{ margin: 0, gap: "4px" }}>
+              <label style=${{ margin: 0 }}>Etappe</label>
+              ${etappeSelect}
+            </div>
+            <input
+              type="text"
+              placeholder="Søk lag, løper, bedrift, bib…"
+              value=${q}
+              onInput=${(e) => setQ(e.target.value)}
+            />
           </div>
         ` : null}
         ${isMobile
@@ -2193,6 +2252,7 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
     for (const tid of g.tids) {
       if (!compareSet.has(tid)) toggleCompare(tid);
     }
+    setOpen(false);
   };
 
   return html`
@@ -3197,6 +3257,7 @@ function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersLi
   const [q, setQ] = usePersistedState("hk:athlete:q", "");
   const [selectedKeys, setSelectedKeys] = usePersistedState("hk:athlete:keys", []);
   const [teamFilters, setTeamFilters] = useState({});
+  const [resultsOpen, setResultsOpen] = useState(false);
 
   useEffect(() => {
     if (!selectedKeys.length) return;
@@ -3206,6 +3267,7 @@ function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersLi
 
   const toggleSelect = useCallback((key) => {
     setSelectedKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+    setResultsOpen(false);
   }, [setSelectedKeys]);
 
   const setRunnerTeamFilter = useCallback((key, tf) => {
@@ -3631,6 +3693,7 @@ function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersLi
     </div>
   `;
 
+  const showResults = resultsOpen && q.trim();
   const searchPanel = html`
     <div className="field">
       <label>Søk løper</label>
@@ -3638,7 +3701,8 @@ function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersLi
         type="text"
         placeholder="navn…"
         value=${q}
-        onInput=${(e) => setQ(e.target.value)}
+        onInput=${(e) => { setQ(e.target.value); setResultsOpen(true); }}
+        onFocus=${() => { if (q.trim()) setResultsOpen(true); }}
         autoFocus=${runnersData.length === 0 && !isMobile}
       />
       <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
@@ -3648,14 +3712,14 @@ function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersLi
     </div>
     <div style=${{
       flex: isMobile ? "0 1 auto" : 1,
-      maxHeight: isMobile && q.trim() ? "50vh" : undefined,
+      maxHeight: isMobile && showResults ? "50vh" : undefined,
       minHeight: 0,
       overflow: "auto",
       marginTop: "4px",
-      border: q.trim() ? "1px solid var(--border)" : "none",
+      border: showResults ? "1px solid var(--border)" : "none",
       borderRadius: "4px",
     }}>
-      ${!q.trim()
+      ${!showResults
         ? null
         : matches.length === 0
         ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
