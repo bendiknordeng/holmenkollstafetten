@@ -34,7 +34,7 @@ python3 -m http.server 8080
 
 Static files only — no build step, no backend, no install. The dataset is pre-baked as JSON.
 
-Live: **[bendiknordeng.github.io/holmenkollstafetten](https://bendiknordeng.github.io/holmenkollstafetten/)**
+Live: **[hksplit.no](https://hksplit.no)**
 
 ## Features
 
