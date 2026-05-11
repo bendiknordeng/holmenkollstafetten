@@ -14,6 +14,8 @@ import {
   ReferenceLine,
   LineChart,
   Line,
+  AreaChart,
+  Area,
 } from "recharts";
 import htm from "htm";
 import L from "leaflet";
@@ -26,18 +28,60 @@ const TEAM_FIELDS = ["tid", "year", "bib", "team", "bedrift", "klasse_id", "tota
 // teams.json: array of [tid, year, bib, team, bedrift, klasse_id, total_sec, finished]
 // splits.json: array of [tid, etappe, split_sec, total_sec, runner]
 
+// Reserve scrollbar gutter on table headers so they line up with virtualized rows
+// (FixedSizeList uses scrollbar-gutter: stable which always reserves the gutter).
+(function measureScrollbar() {
+  if (typeof document === "undefined") return;
+  const outer = document.createElement("div");
+  outer.style.cssText = "position:absolute;visibility:hidden;overflow:scroll;scrollbar-gutter:stable;width:50px;height:50px;";
+  const inner = document.createElement("div");
+  outer.appendChild(inner);
+  document.body.appendChild(outer);
+  const w = outer.offsetWidth - inner.offsetWidth;
+  document.body.removeChild(outer);
+  document.documentElement.style.setProperty("--sb-w", `${w}px`);
+})();
+
+// Keep .gap-info tooltips inside the viewport on narrow screens. The tip is
+// centered on its trigger by default; if the trigger sits near a viewport
+// edge, the 260px tip overflows. We measure on hover/focus and write a
+// CSS custom property --tip-shift that the .tip transform consumes.
+(function setupTooltipPositioning() {
+  if (typeof window === "undefined") return;
+  const MARGIN = 12;
+  function adjust(trigger) {
+    const tip = trigger.querySelector(":scope > .tip");
+    if (!tip) return;
+    trigger.style.setProperty("--tip-shift", "0px");
+    const rect = tip.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    let shift = 0;
+    if (rect.right > vw - MARGIN) shift = -(rect.right - (vw - MARGIN));
+    else if (rect.left < MARGIN) shift = MARGIN - rect.left;
+    if (shift) trigger.style.setProperty("--tip-shift", `${shift}px`);
+  }
+  function handler(e) {
+    const t = e.target?.closest?.(".gap-info");
+    if (t) adjust(t);
+  }
+  document.addEventListener("mouseenter", handler, true);
+  document.addEventListener("focusin", handler);
+  document.addEventListener("touchstart", handler, { passive: true, capture: true });
+})();
+
 async function loadAll() {
-  const [meta, teams, splits, teamRank, statsOverall, statsKlasse] = await Promise.all(
-    [
-      "data/meta.json",
-      "data/teams.json",
-      "data/splits.json",
-      "data/team_rank.json",
-      "data/stats_overall.json",
-      "data/stats_klasse.json",
-    ].map((u) => fetch(u).then((r) => r.json())),
-  );
-  return { meta, teams, splits, teamRank, statsOverall, statsKlasse };
+  const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation] = await Promise.all([
+    fetch("data/meta.json").then((r) => r.json()),
+    fetch("data/teams.json").then((r) => r.json()),
+    fetch("data/splits.json").then((r) => r.json()),
+    fetch("data/team_rank.json").then((r) => r.json()),
+    fetch("data/stats_overall.json").then((r) => r.json()),
+    fetch("data/stats_klasse.json").then((r) => r.json()),
+    fetch("data/etappe_routes.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    fetch("data/etappe_elevation.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+  ]);
+  const etappeGap = buildGapFactors(etappeElevation);
+  return { meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation, etappeGap };
 }
 
 // ---- Helpers --------------------------------------------------------------
@@ -55,6 +99,119 @@ function fmtTime(sec) {
 function fmtPace(sec, distMeters) {
   if (sec == null || !distMeters) return "—";
   const paceSec = (sec / distMeters) * 1000; // sec per km
+  const m = Math.floor(paceSec / 60);
+  const s = Math.round(paceSec % 60);
+  return `${m}:${String(s).padStart(2, "0")}/km`;
+}
+
+// Minetti et al. 2002 metabolic cost of gradient running (J/kg/m).
+// i = slope (rise/run, decimal). C(0) = 3.6 J/kg/m.
+function minettiCost(i) {
+  return 155.4 * i**5 - 30.4 * i**4 - 43.3 * i**3 + 46.3 * i**2 + 19.5 * i + 3.6;
+}
+
+// Gradient-adjusted equivalent flat distance from an elevation profile.
+// profile = { points: [[dist_m, elev_m], ...] }. Returns { realDist, adjDist, factor }
+// or null if not enough data.
+function computeGapStats(profile) {
+  if (!profile || !profile.points || profile.points.length < 2) return null;
+  const pts = profile.points;
+  let real = 0, adj = 0, gain = 0, loss = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i][0] - pts[i - 1][0];
+    if (dx <= 0) continue;
+    const dy = pts[i][1] - pts[i - 1][1];
+    let grade = dy / dx;
+    if (grade > 0.45) grade = 0.45;
+    if (grade < -0.45) grade = -0.45;
+    const factor = minettiCost(grade) / 3.6;
+    real += dx;
+    adj += dx * factor;
+    if (dy > 0) gain += dy;
+    else loss -= dy;
+  }
+  if (real === 0) return null;
+  const netDh = pts[pts.length - 1][1] - pts[0][1];
+  return { realDist: real, adjDist: adj, factor: adj / real, gain, loss, netDh, avgGrade: netDh / real };
+}
+
+function buildGapFactors(etappeElevation) {
+  const out = {};
+  if (!etappeElevation) return out;
+  for (const k of Object.keys(etappeElevation)) {
+    const stats = computeGapStats(etappeElevation[k]);
+    if (stats) out[k] = stats;
+  }
+  return out;
+}
+
+const GAP_EXPLAIN_SHORT = "GAP = gradient-justert pace. Etappen omregnes til flatlands-ekvivalent via Minetti, slik at oppoverbakke og nedoverbakke blir sammenlignbart med flate etapper.";
+const GAP_FACTOR_EXPLAIN = "GAP-faktor: 1.20 betyr etappen er 20 % tyngre enn flatt; 0.85 betyr 15 % lettere.";
+
+// Reusable hover-tooltip for the "GAP" label. Pass placement: "top" (default), "below", "right".
+function gapLabel(text = "GAP", placement = "top") {
+  const cls = "gap-info" + (placement === "below" ? " below" : "") + (placement === "right" ? " right" : "");
+  return html`<span className=${cls} tabIndex=${0}>
+    ${text}
+    <span className="icon" aria-hidden="true">ⓘ</span>
+    <span className="tip" role="tooltip">
+      <strong>GAP</strong> = gradient-justert pace (Minetti). Etappen regnes om til flatlands-ekvivalent ut fra høydeprofilen, slik at oppover- og nedoverbakke kan sammenlignes med flatt løp. GAP-faktor over 1 = tyngre enn flatt, under 1 = lettere.
+    </span>
+  </span>`;
+}
+
+function useSort(initialKey = null, initialDir = "asc") {
+  const [sort, setSort] = useState({ key: initialKey, dir: initialDir });
+  const toggle = useCallback((key, defaultDir = "asc") => {
+    setSort((cur) => {
+      if (cur.key === key) return { key, dir: cur.dir === "asc" ? "desc" : "asc" };
+      return { key, dir: defaultDir };
+    });
+  }, []);
+  return [sort, toggle];
+}
+
+function sortRows(rows, sort, accessors) {
+  if (!sort || !sort.key || !accessors[sort.key]) return rows;
+  const fn = accessors[sort.key];
+  const dir = sort.dir === "asc" ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = fn(a), bv = fn(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "string") return av.localeCompare(bv, "no") * dir;
+    return (av - bv) * dir;
+  });
+}
+
+function SortHeader({ label, sortKey, sort, onSort, right, defaultDir = "asc", title }) {
+  const active = sort?.key === sortKey;
+  const arrow = active ? (sort.dir === "asc" ? "▲" : "▼") : "↕";
+  return html`<th
+    className=${"sortable" + (right ? " right" : "") + (active ? " active" : "")}
+    title=${title}
+    onClick=${() => onSort(sortKey, defaultDir)}
+  >${label}<span className="sort-arrow">${arrow}</span></th>`;
+}
+
+function paceLabel(text = "Pace", placement = "top") {
+  const cls = "gap-info" + (placement === "below" ? " below" : "") + (placement === "right" ? " right" : "");
+  return html`<span className=${cls} tabIndex=${0}>
+    ${text}
+    <span className="icon" aria-hidden="true">ⓘ</span>
+    <span className="tip" role="tooltip">
+      <strong>Pace</strong> = tid per kilometer (min:ss/km). Faktisk fart på etappen uten justering for stigning. Sammenlign med GAP for å se hvor mye terrenget påvirker.
+    </span>
+  </span>`;
+}
+
+// Pace adjusted by GAP factor (Minetti). gapFactor = adj_dist / real_dist.
+// Returns formatted min:ss/km, or falls back to "—".
+function fmtPaceGap(sec, distMeters, gapFactor) {
+  if (sec == null || !distMeters || !gapFactor) return "—";
+  const adjDist = distMeters * gapFactor;
+  const paceSec = (sec / adjDist) * 1000;
   const m = Math.floor(paceSec / 60);
   const s = Math.round(paceSec % 60);
   return `${m}:${String(s).padStart(2, "0")}/km`;
@@ -336,12 +493,13 @@ function Topbar({ view, setView, n, compareCount, hasSidebar, sidebarOpen, setSi
           </svg>
         </button>
       ` : null}
-      <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2019–2026</span></h1>
+      <h1>HK<em>Split</em> <span className="small">Holmenkollstafetten · ${n.toLocaleString("no")} lag · 2022–2026</span></h1>
       <div className="spacer"></div>
       <div className="tabs">
         <button className=${view === "teams" ? "active" : ""} onClick=${() => setView("teams")}>Lag</button>
         <button className=${view === "etapper" ? "active" : ""} onClick=${() => setView("etapper")}>Etapper</button>
         <button className=${view === "etappesok" ? "active" : ""} onClick=${() => setView("etappesok")}>Etappe-søk</button>
+        <button className=${view === "atlet" ? "active" : ""} onClick=${() => setView("atlet")}>Atlet</button>
         <button className=${view === "rute" ? "active" : ""} onClick=${() => setView("rute")}>Rute</button>
         <button className=${view === "compare" ? "active" : ""} onClick=${() => setView("compare")}>
           ${isMobile ? "Sammenlign" : "Sammenligning"}${compareCount ? html` <span className="tab-badge">${compareCount}</span>` : null}
@@ -589,6 +747,28 @@ function TeamsView({ db, filters, setFilters, selected, setSelected, compareTids
 
   return html`
     <div className="content" style=${{ padding: 0 }}>
+      ${isMobile ? html`
+        <div
+          className="field mobile-inline-search"
+          style=${{
+            margin: 0,
+            padding: "10px 12px",
+            background: "var(--bg-2)",
+            borderBottom: "1px solid var(--border)",
+            position: "sticky",
+            top: 0,
+            zIndex: 4,
+            gap: "4px",
+          }}
+        >
+          <input
+            type="text"
+            placeholder=${filters.qField === "team" ? "Søk lagnavn…" : filters.qField === "bedrift" ? "Søk bedrift…" : "Søk lag eller bedrift…"}
+            value=${(filters.q && filters.q[0]) || ""}
+            onInput=${(e) => setFilters({ ...filters, q: e.target.value ? [e.target.value] : [] })}
+          />
+        </div>
+      ` : null}
       <div className="table-wrap">
         <div className="table-header" style=${{ gridTemplateColumns: cols, overflow: "visible", display: isMobile ? "none" : undefined }}>
           <div>
@@ -684,6 +864,7 @@ function AutoSizedList({ itemCount, itemSize, Row }) {
           width=${size.w}
           itemCount=${itemCount}
           itemSize=${itemSize}
+          style=${{ scrollbarGutter: "stable" }}
         >
           ${Row}
         <//>
@@ -695,7 +876,7 @@ function AutoSizedList({ itemCount, itemSize, Row }) {
 function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAllYears, cumIndex, compareTids, toggleCompare }) {
   const isComp = compareTids?.includes(tid);
   const isMobile = useIsMobile();
-  const { teams, meta, teamRank, statsOverall, statsKlasse } = db;
+  const { teams, meta, teamRank, statsOverall, statsKlasse, etappeGap } = db;
   const team = teams[tid];
   if (!team) return null;
   const [, year, bib, name, bedrift, kid, total, finished] = team;
@@ -704,7 +885,7 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
   const splits = splitsByTid.get(tid) || [];
   const dist = meta.etappe_distances || {};
 
-  const rows = splits.map((s) => {
+  const baseRows = splits.map((s) => {
     const [, etappe, split_sec, total_sec, runner] = s;
     const sk = `${year}-${etappe}`;
     const stat = statsOverall[sk];
@@ -716,8 +897,23 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
     const klSk = `${year}-${etappe}-${kid}`;
     const klStat = statsKlasse[klSk];
     const dMeters = dist[etappe];
-    return { etappe, split_sec, total_sec, runner, pctYear, rkYear, pctAll, rkAll, n: stat?.n, nAll: allArr?.length, klMedian: klStat?.median, dMeters };
+    const gapF = etappeGap?.[String(etappe)]?.factor || null;
+    return { etappe, split_sec, total_sec, runner, pctYear, rkYear, pctAll, rkAll, n: stat?.n, nAll: allArr?.length, klMedian: klStat?.median, dMeters, gapF };
   });
+  const [tdSort, toggleTdSort] = useSort("etappe", "asc");
+  const rows = useMemo(() => sortRows(baseRows, tdSort, {
+    etappe: (r) => r.etappe,
+    runner: (r) => r.runner || "",
+    dist: (r) => r.dMeters,
+    time: (r) => r.split_sec,
+    pace: (r) => (r.dMeters ? r.split_sec / r.dMeters : null),
+    gap: (r) => (r.dMeters && r.gapF ? r.split_sec / (r.dMeters * r.gapF) : null),
+    rkYear: (r) => r.rkYear,
+    pctYear: (r) => r.pctYear,
+    rkAll: (r) => r.rkAll,
+    pctAll: (r) => r.pctAll,
+    klMedian: (r) => r.klMedian,
+  }), [baseRows, tdSort]);
 
   // Rank progression per etappe (in klasse + overall).
   const progression = useMemo(() => {
@@ -819,6 +1015,7 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
                     <div className="etappe-card-time">
                       <div className="t">${fmtTime(r.split_sec)}</div>
                       <div className="p">${fmtPace(r.split_sec, r.dMeters)}${r.dMeters ? ` · ${r.dMeters} m` : ""}</div>
+                      ${r.gapF ? html`<div className="p" style=${{ color: "var(--accent)" }}>${gapLabel("GAP", "below")} ${fmtPaceGap(r.split_sec, r.dMeters, r.gapF)}</div>` : null}
                     </div>
                   </div>
                   <div className="etappe-card-stats">
@@ -851,17 +1048,15 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
             <table className="etappes-table">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <${SortHeader} label="#" sortKey="etappe" sort=${tdSort} onSort=${toggleTdSort} />
                   <th>Etappe</th>
-                  <th>Løper</th>
-                  <th className="right">Dist.</th>
-                  <th className="right">Tid</th>
-                  <th className="right">Fart</th>
-                  <th className="right">Rang ${year}</th>
-                  <th className="right">Percentil ${year}</th>
-                  <th className="right">Rang alle år</th>
-                  <th className="right">Percentil alle år</th>
-                  <th className="right">Klassemedian</th>
+                  <${SortHeader} label="Løper" sortKey="runner" sort=${tdSort} onSort=${toggleTdSort} />
+                  <${SortHeader} label="Tid" sortKey="time" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
+                  <${SortHeader} label=${paceLabel("Fart", "below")} sortKey="pace" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
+                  <${SortHeader} label=${gapLabel("GAP", "below")} sortKey="gap" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
+                  <${SortHeader} label=${`Pct ${year}`} sortKey="pctYear" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
+                  <${SortHeader} label="Pct alle år" sortKey="pctAll" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
+                  <${SortHeader} label="Klassemedian" sortKey="klMedian" sort=${tdSort} onSort=${toggleTdSort} right=${true} />
                 </tr>
               </thead>
               <tbody>
@@ -869,22 +1064,24 @@ function TeamDetail({ db, tid, splitsByTid, sameTeamIndex, setSelected, statsAll
                   (r) => html`
                     <tr key=${r.etappe}>
                       <td>${r.etappe}</td>
-                      <td className="team-name" style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe] || ""}</td>
+                      <td className="team-name" style=${{ color: "var(--muted)", fontSize: "12px" }}>
+                        ${ETAPPE_NAMES[r.etappe] || ""}${r.dMeters ? html` <span style=${{ color: "var(--muted)", opacity: 0.7 }}>· ${r.dMeters} m</span>` : null}
+                      </td>
                       <td className="team-name">${r.runner || "—"}</td>
-                      <td className="right muted" style=${{ fontSize: "12px" }}>${r.dMeters ? r.dMeters + " m" : "—"}</td>
                       <td className="right">${fmtTime(r.split_sec)}</td>
                       <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split_sec, r.dMeters)}</td>
-                      <td className="right">${r.rkYear ? `${r.rkYear} / ${r.n}` : "—"}</td>
+                      <td className="right" style=${{ fontSize: "12px" }}>${r.gapF ? fmtPaceGap(r.split_sec, r.dMeters, r.gapF) : html`<span className="muted">—</span>`}</td>
                       <td className="right">
                         ${r.pctYear != null
                           ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>`
                           : "—"}
+                        ${r.rkYear ? html` <span style=${{ fontSize: "10px", color: "var(--muted)" }}>${r.rkYear}/${r.n}</span>` : null}
                       </td>
-                      <td className="right">${r.rkAll ? `${r.rkAll} / ${r.nAll}` : "—"}</td>
                       <td className="right">
                         ${r.pctAll != null
                           ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>`
                           : "—"}
+                        ${r.rkAll ? html` <span style=${{ fontSize: "10px", color: "var(--muted)" }}>${r.rkAll}/${r.nAll}</span>` : null}
                       </td>
                       <td className="right muted">${fmtTime(r.klMedian)}</td>
                     </tr>
@@ -1180,7 +1377,7 @@ function EtappeKlasseFilter({ klasseFacets, klasseSel, setKlasseSel, toggleKlass
 }
 
 function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, setEtappePreselect }) {
-  const { teams, meta, statsOverall } = db;
+  const { teams, meta, statsOverall, etappeGap } = db;
   const isMobile = useIsMobile();
   const [etappe, setEtappe] = usePersistedState("hk:etapper:etappe", 7);
   const [klasseSel, setKlasseSel] = usePersistedState("hk:etapper:klasseSel", []);
@@ -1215,6 +1412,14 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
   }, [rawEntries, meta.klasser]);
 
   const top10AllTime = allEntries.slice(0, 10);
+  const [t10Sort, toggleT10Sort] = useSort("time", "asc");
+  const t10Rows = useMemo(() => sortRows(top10AllTime, t10Sort, {
+    team: (r) => r.team || "",
+    year: (r) => r.year,
+    time: (r) => r.split,
+    pace: (r) => r.split,
+    gap: (r) => r.split,
+  }), [top10AllTime, t10Sort]);
 
   const fastestPerYear = useMemo(() => {
     const m = new Map();
@@ -1293,6 +1498,8 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
   };
 
   const dist = meta.etappe_distances[etappe];
+  const gapStats = etappeGap?.[String(etappe)] || null;
+  const gapFactor = gapStats?.factor || null;
   const profile = ETAPPE_PROFILES[etappe] || {};
   const cardColor = (year) => `var(--c-${year})`;
 
@@ -1382,16 +1589,23 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
               <div className="lbl">Distanse</div>
               <div className="val">${dist}<span className="u">m</span></div>
             </div>
+            ${gapStats ? html`
+              <div className="ehm-stat">
+                <div className="lbl">Stigning</div>
+                <div className="val">${gapStats.netDh >= 0 ? "+" : ""}${gapStats.netDh.toFixed(0)}<span className="u">m</span></div>
+                <div className="sub">${(gapStats.avgGrade * 100).toFixed(1)}% snitt · ${gapLabel(`×${gapFactor.toFixed(2)}`, "below")}</div>
+              </div>
+            ` : null}
             ${allTimeStats ? html`
               <div className="ehm-stat">
                 <div className="lbl">Rekord</div>
                 <div className="val">${fmtTime(allTimeStats.min)}</div>
-                <div className="sub">${fmtPace(allTimeStats.min, dist)}</div>
+                <div className="sub">${fmtPace(allTimeStats.min, dist)}${gapFactor ? html` · ${gapLabel("GAP", "below")} ${fmtPaceGap(allTimeStats.min, dist, gapFactor)}` : null}</div>
               </div>
               <div className="ehm-stat">
                 <div className="lbl">Median</div>
                 <div className="val">${fmtTime(allTimeStats.median)}</div>
-                <div className="sub">${fmtPace(allTimeStats.median, dist)}</div>
+                <div className="sub">${fmtPace(allTimeStats.median, dist)}${gapFactor ? html` · ${gapLabel("GAP", "below")} ${fmtPaceGap(allTimeStats.median, dist, gapFactor)}` : null}</div>
               </div>
               <div className="ehm-stat">
                 <div className="lbl">Løp</div>
@@ -1418,16 +1632,23 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
                 <div className="kicker">Distanse</div>
                 <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1, color: "var(--accent)" }}>${dist}<span style=${{ fontSize: "16px", color: "var(--muted)", marginLeft: "4px" }}>m</span></div>
               </div>
+              ${gapStats ? html`
+                <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
+                  <div className="kicker">Stigning</div>
+                  <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1, color: gapStats.netDh > 5 ? "var(--bad)" : gapStats.netDh < -5 ? "var(--good)" : "var(--text)" }}>${gapStats.netDh >= 0 ? "+" : ""}${gapStats.netDh.toFixed(0)}<span style=${{ fontSize: "16px", color: "var(--muted)", marginLeft: "4px" }}>m</span></div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${(gapStats.avgGrade * 100).toFixed(1)}% snitt · ${gapLabel(`×${gapFactor.toFixed(2)}`, "below")}</div>
+                </div>
+              ` : null}
               ${allTimeStats ? html`
                 <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
                   <div className="kicker">All-time rekord</div>
                   <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.min)}</div>
-                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.min, dist)}</div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.min, dist)}${gapFactor ? html` · ${gapLabel("GAP", "below")} ${fmtPaceGap(allTimeStats.min, dist, gapFactor)}` : null}</div>
                 </div>
                 <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
                   <div className="kicker">Median</div>
                   <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "32px", lineHeight: 1 }}>${fmtTime(allTimeStats.median)}</div>
-                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.median, dist)}</div>
+                  <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>${fmtPace(allTimeStats.median, dist)}${gapFactor ? html` · ${gapLabel("GAP", "below")} ${fmtPaceGap(allTimeStats.median, dist, gapFactor)}` : null}</div>
                 </div>
                 <div style=${{ padding: "12px 16px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "5px" }}>
                   <div className="kicker">Antall løp</div>
@@ -1449,14 +1670,15 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
             <thead>
               <tr>
                 <th style=${{ width: "32px" }}>#</th>
-                <th>Lag · løper</th>
-                <th>År</th>
-                <th className="right">Tid</th>
-                <th className="right">Pace</th>
+                <${SortHeader} label="Lag · løper" sortKey="team" sort=${t10Sort} onSort=${toggleT10Sort} />
+                <${SortHeader} label="År" sortKey="year" sort=${t10Sort} onSort=${toggleT10Sort} defaultDir="desc" />
+                <${SortHeader} label="Tid" sortKey="time" sort=${t10Sort} onSort=${toggleT10Sort} right=${true} />
+                <${SortHeader} label=${paceLabel("Pace", "below")} sortKey="pace" sort=${t10Sort} onSort=${toggleT10Sort} right=${true} />
+                ${gapFactor ? html`<${SortHeader} label=${gapLabel("GAP", "below")} sortKey="gap" sort=${t10Sort} onSort=${toggleT10Sort} right=${true} />` : null}
               </tr>
             </thead>
             <tbody>
-              ${top10AllTime.map((e, i) => html`
+              ${t10Rows.map((e, i) => html`
                 <tr key=${e.tid + "-" + i} onClick=${() => { setSelected(e.tid); setView("teams"); }} style=${{ cursor: "pointer" }}>
                   <td style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "16px", color: i === 0 ? "var(--accent)" : "var(--muted)" }}>${i + 1}</td>
                   <td className="team-name">
@@ -1466,6 +1688,7 @@ function EtapperView({ db, splitsByTid, statsAllYears, setView, setSelected, set
                   <td><span className=${"chip year-" + e.year}>${e.year}</span></td>
                   <td className="right" style=${{ fontWeight: i === 0 ? 700 : 400, color: i === 0 ? "var(--accent)" : "var(--text)" }}>${fmtTime(e.split)}</td>
                   <td className="right muted" style=${{ fontSize: "11px" }}>${fmtPace(e.split, dist)}</td>
+                  ${gapFactor ? html`<td className="right muted" style=${{ fontSize: "11px" }}>${fmtPaceGap(e.split, dist, gapFactor)}</td>` : null}
                 </tr>
               `)}
             </tbody>
@@ -1687,7 +1910,7 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
       <div className="content" style=${{ padding: 0, display: "flex", flexDirection: "column" }}>
         ${isMobile ? html`
           <div
-            className="field"
+            className="mobile-inline-search"
             style=${{
               margin: 0,
               padding: "10px 12px",
@@ -1696,11 +1919,21 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
               position: "sticky",
               top: 0,
               zIndex: 4,
-              gap: "4px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
             }}
           >
-            <label style=${{ margin: 0 }}>Etappe</label>
-            ${etappeSelect}
+            <div className="field" style=${{ margin: 0, gap: "4px" }}>
+              <label style=${{ margin: 0 }}>Etappe</label>
+              ${etappeSelect}
+            </div>
+            <input
+              type="text"
+              placeholder="Søk lag, løper, bedrift, bib…"
+              value=${q}
+              onInput=${(e) => setQ(e.target.value)}
+            />
           </div>
         ` : null}
         ${isMobile
@@ -1770,7 +2003,7 @@ function EtappeSokView({ db, splitsByTid, setSelected, setView, statsAllYears, c
             <div>Løper</div>
             <div>Klasse</div>
             <div className="right">Tid</div>
-            <div className="right">Pace</div>
+            <div className="right">${paceLabel("Pace", "below")}</div>
             <div className="right">Pct år</div>
             <div className="right">Pct alle</div>
             <div className="right">Total ved start</div>
@@ -2019,6 +2252,7 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
     for (const tid of g.tids) {
       if (!compareSet.has(tid)) toggleCompare(tid);
     }
+    setOpen(false);
   };
 
   return html`
@@ -2186,14 +2420,87 @@ function AddTeamSearch({ db, splitsByTid, compareTids, toggleCompare }) {
   `;
 }
 
+function ElevationProfile({ profile }) {
+  const data = useMemo(
+    () => profile.points.map(([d, e]) => ({ d, e })),
+    [profile],
+  );
+  return html`
+    <div className="elevation-profile">
+      <div className="ep-head">
+        <div className="ep-kicker">Høydeprofil</div>
+        <div className="ep-stats">
+          <span><span className="lbl">Stigning</span> <span className="val gain">+${Math.round(profile.gain)} m</span></span>
+          <span><span className="lbl">Fall</span> <span className="val loss">−${Math.round(profile.loss)} m</span></span>
+          <span><span className="lbl">Min/Maks</span> <span className="val">${Math.round(profile.min)}–${Math.round(profile.max)} m</span></span>
+        </div>
+      </div>
+      <${ResponsiveContainer} width="100%" height=${130}>
+        <${AreaChart} data=${data} margin=${{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="ep-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f4cf3a" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#f4cf3a" stopOpacity="0.05" />
+            </linearGradient>
+          </defs>
+          <${CartesianGrid} stroke="#2c261d" strokeDasharray="3 3" vertical=${false} />
+          <${XAxis}
+            dataKey="d"
+            type="number"
+            domain=${[0, profile.length_m]}
+            tickFormatter=${(v) => v >= 1000 ? `${(v / 1000).toFixed(1)} km` : `${Math.round(v)} m`}
+            stroke="#978a72"
+            fontSize=${10}
+            tickLine=${false}
+            axisLine=${{ stroke: "#3a3324" }}
+          />
+          <${YAxis}
+            domain=${["dataMin - 5", "dataMax + 5"]}
+            tickFormatter=${(v) => `${Math.round(v)} m`}
+            stroke="#978a72"
+            fontSize=${10}
+            tickLine=${false}
+            axisLine=${false}
+            width=${44}
+          />
+          <${Tooltip}
+            contentStyle=${{ background: "#1a1610", border: "1px solid #3a3324", borderRadius: 4, fontSize: 12 }}
+            labelFormatter=${(v) => v >= 1000 ? `${(v / 1000).toFixed(2)} km` : `${Math.round(v)} m`}
+            formatter=${(v) => [`${Math.round(v)} moh`, "Høyde"]}
+          />
+          <${Area}
+            type="monotone"
+            dataKey="e"
+            stroke="#f4cf3a"
+            strokeWidth=${2}
+            fill="url(#ep-fill)"
+            isAnimationActive=${false}
+          />
+        <//>
+      <//>
+    </div>
+  `;
+}
+
 function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtappePreselect }) {
-  const { meta } = db;
+  const { meta, etappeRoutes, etappeElevation } = db;
   const coords = meta.etappe_coords || [];
   const [activeEt, setActiveEt] = useState(null);
+  const isMobile = useIsMobile();
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const segLayerRef = useRef(null);
+  const stageLayersRef = useRef({});
   const markersRef = useRef([]);
+
+  // Resolve per-etappe latlng path: GPX if available, else straight chip-mat line.
+  const stagePath = (e) => {
+    const a = coords[e - 1], b = coords[e];
+    const gpx = etappeRoutes?.[String(e)];
+    if (gpx && gpx.length >= 2) return gpx;
+    if (!a || !b) return null;
+    return [[a.lat, a.lon], [b.lat, b.lon]];
+  };
 
   // Initialize map once
   useEffect(() => {
@@ -2207,24 +2514,47 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       maxZoom: 19,
     }).addTo(map);
 
-    const latlngs = coords.map((c) => [c.lat, c.lon]);
-    if (latlngs.length) {
-      map.fitBounds(latlngs, { padding: [40, 40] });
+    // Per-etappe base polylines: a darker casing under a saffron line
+    // for clear contrast against the OSM tiles.
+    const allPathsForBounds = [];
+    for (let e = 1; e <= 15; e++) {
+      const path = stagePath(e);
+      if (!path) continue;
+      const isApprox = !etappeRoutes?.[String(e)];
+      // Casing
+      L.polyline(path, {
+        color: "#0a0908",
+        weight: 8,
+        opacity: 0.55,
+        lineCap: "round",
+        lineJoin: "round",
+      }).addTo(map);
+      // Foreground stroke
+      const layer = L.polyline(path, {
+        color: "#f4cf3a",
+        weight: 4.5,
+        opacity: 0.85,
+        lineCap: "round",
+        lineJoin: "round",
+        dashArray: isApprox ? "6 8" : null,
+      }).addTo(map);
+      layer.on("click", () => setActiveEt(e));
+      stageLayersRef.current[e] = layer;
+      allPathsForBounds.push(...path);
+    }
+    if (allPathsForBounds.length) {
+      map.fitBounds(allPathsForBounds, { padding: [40, 40] });
+    } else if (coords.length) {
+      map.fitBounds(coords.map((c) => [c.lat, c.lon]), { padding: [40, 40] });
     }
 
-    // Full route polyline
-    L.polyline(latlngs, {
-      color: "#5e5444",
-      weight: 4,
-      opacity: 0.55,
-    }).addTo(map);
-
-    // Markers
+    // Markers: every chip-mat is labelled with the stage that STARTS at it.
+    // Chip 0 = start of stage 1 -> "1"; chip 14 = start of stage 15 -> "15";
+    // chip 15 is the finish line -> "M".
     coords.forEach((c, i) => {
-      const isStart = i === 0;
       const isFinish = i === coords.length - 1;
-      const cls = isStart ? "etappe-marker start" : isFinish ? "etappe-marker finish" : "etappe-marker";
-      const label = isStart ? "S" : isFinish ? "M" : String(i);
+      const label = isFinish ? "M" : String(i + 1);
+      const cls = isFinish ? "etappe-marker finish" : i === 0 ? "etappe-marker start" : "etappe-marker";
       const icon = L.divIcon({
         className: "",
         iconSize: [28, 28],
@@ -2234,8 +2564,9 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       const m = L.marker([c.lat, c.lon], { icon });
       m.bindTooltip(c.navn, { direction: "top", offset: [0, -14] });
       m.on("click", () => {
-        // Etappe number = i (i=0 is start, i=1 is end of etappe 1, etc.)
-        setActiveEt(i === 0 ? 1 : i);
+        // Click the finish marker -> the stage that ends there (15).
+        // Otherwise -> the stage that starts at this chip-mat.
+        setActiveEt(isFinish ? 15 : i + 1);
       });
       m.addTo(map);
       markersRef.current.push(m);
@@ -2250,10 +2581,11 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       map.remove();
       mapRef.current = null;
       markersRef.current = [];
+      stageLayersRef.current = {};
     };
-  }, [coords]);
+  }, [coords, etappeRoutes]);
 
-  // Highlight selected etappe segment
+  // Highlight selected etappe segment with the GPX path (or chip-mat fallback).
   useEffect(() => {
     if (!mapRef.current) return;
     if (segLayerRef.current) {
@@ -2261,24 +2593,17 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       segLayerRef.current = null;
     }
     if (activeEt == null) return;
-    const a = coords[activeEt - 1];
-    const b = coords[activeEt];
-    if (!a || !b) return;
-    segLayerRef.current = L.polyline(
-      [
-        [a.lat, a.lon],
-        [b.lat, b.lon],
-      ],
-      { color: "#f4cf3a", weight: 7, opacity: 0.95 },
-    ).addTo(mapRef.current);
-    mapRef.current.fitBounds(
-      [
-        [a.lat, a.lon],
-        [b.lat, b.lon],
-      ],
-      { padding: [80, 80], maxZoom: 16 },
-    );
-  }, [activeEt, coords]);
+    const path = stagePath(activeEt);
+    if (!path) return;
+    segLayerRef.current = L.polyline(path, {
+      color: "#ec7b3a",
+      weight: 7,
+      opacity: 1,
+      lineCap: "round",
+      lineJoin: "round",
+    }).addTo(mapRef.current);
+    mapRef.current.fitBounds(path, { padding: [80, 80], maxZoom: 17 });
+  }, [activeEt, coords, etappeRoutes]);
 
   // Selected etappe quick stats per year
   const stats = useMemo(() => {
@@ -2294,6 +2619,100 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       allTime: all.length ? { n: all.length, min: all[0], median: all[Math.floor(all.length / 2)], max: all[all.length - 1] } : null,
     };
   }, [activeEt, meta.years, db.statsOverall, statsAllYears]);
+
+  const detailsPanel = activeEt != null && stats
+    ? html`
+        <div className=${"map-detail" + (isMobile ? " mobile" : "")}>
+          <div className="md-head">
+            <div className="md-title">
+              <div className="kicker">Etappe ${activeEt} · ${ETAPPE_NAMES[activeEt] || ""}</div>
+              <h2>
+                ${isMobile
+                  ? html`<span>${coords[activeEt - 1]?.navn} → ${coords[activeEt]?.navn}</span>`
+                  : html`${meta.etappe_distances[activeEt]} m <em>raskeste tider</em>`}
+              </h2>
+              ${isMobile
+                ? html`<div className="md-sub">${meta.etappe_distances[activeEt]} m · raskeste tider</div>`
+                : null}
+            </div>
+            ${!isMobile
+              ? html`
+                  <button
+                    className="primary"
+                    onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
+                  >
+                    Vis alle løp på etappe ${activeEt} →
+                  </button>
+                `
+              : null}
+          </div>
+          ${etappeElevation?.[String(activeEt)]
+            ? html`<${ElevationProfile} profile=${etappeElevation[String(activeEt)]} />`
+            : null}
+          ${stats.allTime
+            ? html`
+                <div className="md-record">
+                  <div className="lbl">Rekord</div>
+                  <div className="time">${fmtTime(stats.allTime.min)}</div>
+                  <div className="meta">
+                    <div>Median ${fmtTime(stats.allTime.median)}</div>
+                    <div>${stats.allTime.n.toLocaleString("no")} løp</div>
+                  </div>
+                </div>
+              `
+            : null}
+          <div className="md-years">
+            ${stats.perYear.map((s) => {
+              const recordDelta = stats.allTime ? s.min - stats.allTime.min : 0;
+              const isRecordYear = stats.allTime && s.min === stats.allTime.min;
+              return html`
+                <div className="md-year-card" key=${s.y} style=${{ borderLeftColor: `var(--c-${s.y})` }}>
+                  <div className="yr-head">
+                    <span className="yr" style=${{ color: `var(--c-${s.y})` }}>${s.y}</span>
+                    ${isRecordYear ? html`<span className="yr-rekord">Rekord</span>` : null}
+                  </div>
+                  <div className="yr-time">${fmtTime(s.min)}</div>
+                  <div className="yr-delta">${recordDelta > 0 ? `+${fmtTime(recordDelta)}` : "—"} vs rekord</div>
+                  <div className="yr-foot">median ${fmtTime(s.median)} · ${s.n} løp</div>
+                </div>
+              `;
+            })}
+          </div>
+          ${isMobile
+            ? html`
+                <button
+                  className="primary md-cta"
+                  onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
+                >
+                  Vis alle løp på etappe ${activeEt} →
+                </button>
+              `
+            : null}
+        </div>
+      `
+    : null;
+
+  if (isMobile) {
+    return html`
+      <div className="map-view mobile">
+        <div className="map-stage-strip">
+          <button
+            className=${activeEt == null ? "active" : ""}
+            onClick=${() => setActiveEt(null)}
+          >Alle</button>
+          ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((e) => html`
+            <button
+              key=${e}
+              className=${activeEt === e ? "active" : ""}
+              onClick=${() => setActiveEt(e)}
+            >${e}</button>
+          `)}
+        </div>
+        <div ref=${containerRef} className="map-canvas mobile"></div>
+        ${detailsPanel}
+      </div>
+    `;
+  }
 
   return html`
     <div className="map-view" style=${{ display: "flex", flexDirection: "row" }}>
@@ -2328,89 +2747,7 @@ function MapView({ db, statsAllYears, splitsByTid, setView, setSelected, setEtap
       </div>
       <div style=${{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <div ref=${containerRef} className="map-canvas"></div>
-        ${activeEt != null && stats
-          ? html`
-              <div style=${{ padding: "20px 24px", borderTop: "1px solid var(--border)", background: "linear-gradient(to bottom, var(--bg-2), var(--bg))" }}>
-                <div style=${{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <div>
-                    <div className="kicker">Etappe ${activeEt} · ${ETAPPE_NAMES[activeEt] || ""}</div>
-                    <h2 style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "26px", margin: "4px 0 0", letterSpacing: "-0.01em" }}>
-                      ${meta.etappe_distances[activeEt]} m <em style=${{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>raskeste tider</em>
-                    </h2>
-                  </div>
-                  <button
-                    className="primary"
-                    onClick=${() => { setEtappePreselect && setEtappePreselect(activeEt); setView("etappesok"); }}
-                  >
-                    Vis alle løp på etappe ${activeEt} →
-                  </button>
-                </div>
-                ${stats.allTime
-                  ? html`
-                      <div style=${{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
-                        <div style=${{
-                          display: "grid",
-                          gridTemplateColumns: "auto 1fr auto auto",
-                          gap: "16px",
-                          alignItems: "center",
-                          padding: "14px 18px",
-                          background: "var(--panel)",
-                          border: "1px solid var(--border-strong)",
-                          borderLeft: "4px solid var(--accent)",
-                          borderRadius: "5px",
-                        }}>
-                          <div style=${{ fontFamily: "Fraunces, serif", fontStyle: "italic", fontWeight: 700, fontSize: "13px", color: "var(--accent)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Rekord</div>
-                          <div style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "30px", letterSpacing: "-0.01em" }}>
-                            ${fmtTime(stats.allTime.min)}
-                          </div>
-                          <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", textAlign: "right" }}>
-                            <div>Median ${fmtTime(stats.allTime.median)}</div>
-                            <div style=${{ marginTop: "2px" }}>P10 / P90 spread</div>
-                          </div>
-                          <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "11px", color: "var(--muted)", textAlign: "right" }}>
-                            ${stats.allTime.n.toLocaleString("no")} løp
-                          </div>
-                        </div>
-                      </div>
-                    `
-                  : null}
-                <div style=${{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${stats.perYear.length}, 1fr)`,
-                  gap: "8px",
-                }}>
-                  ${stats.perYear.map((s) => {
-                    const recordDelta = stats.allTime ? s.min - stats.allTime.min : 0;
-                    const isRecordYear = stats.allTime && s.min === stats.allTime.min;
-                    return html`
-                      <div key=${s.y} style=${{
-                        padding: "10px 14px",
-                        background: "var(--bg-2)",
-                        border: "1px solid var(--border)",
-                        borderLeft: `3px solid var(--c-${s.y})`,
-                        borderRadius: "4px",
-                        position: "relative",
-                      }}>
-                        <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                          <span style=${{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: "16px", color: `var(--c-${s.y})` }}>${s.y}</span>
-                          ${isRecordYear ? html`<span style=${{ fontSize: "9px", letterSpacing: "0.1em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>Rekord</span>` : null}
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "20px", fontWeight: 700, marginTop: "4px", lineHeight: 1 }}>
-                          ${fmtTime(s.min)}
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", color: "var(--muted)", marginTop: "6px" }}>
-                          ${recordDelta > 0 ? `+${fmtTime(recordDelta)}` : "—"} vs rekord
-                        </div>
-                        <div style=${{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", color: "var(--muted)", marginTop: "1px" }}>
-                          median ${fmtTime(s.median)} · ${s.n} løp
-                        </div>
-                      </div>
-                    `;
-                  })}
-                </div>
-              </div>
-            `
-          : null}
+        ${detailsPanel}
       </div>
     </div>
   `;
@@ -2867,6 +3204,558 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
   `;
 }
 
+// ---- Athlete (individual runner) view ------------------------------------
+
+function buildRunnerIndex(db) {
+  // Map<lowercase exact name, { display, entries: [{ tid, year, etappe, split, total, team, bedrift, klasse_id }] }>
+  const m = new Map();
+  for (const s of db.splits) {
+    const raw = (s[4] || "").trim();
+    if (!raw) continue;
+    if (s[2] == null) continue;
+    const key = raw.toLowerCase();
+    const t = db.teams[s[0]];
+    if (!t) continue;
+    let rec = m.get(key);
+    if (!rec) {
+      rec = { display: raw, displayCounts: {}, entries: [] };
+      m.set(key, rec);
+    }
+    rec.displayCounts[raw] = (rec.displayCounts[raw] || 0) + 1;
+    rec.entries.push({
+      tid: s[0],
+      year: t[1],
+      etappe: s[1],
+      split: s[2],
+      total: s[3],
+      team: t[3],
+      bedrift: t[4],
+      klasse_id: t[5],
+    });
+  }
+  // Pick most common casing as canonical display.
+  for (const rec of m.values()) {
+    let bestName = rec.display;
+    let bestN = 0;
+    for (const [name, n] of Object.entries(rec.displayCounts)) {
+      if (n > bestN) { bestN = n; bestName = name; }
+    }
+    rec.display = bestName;
+    delete rec.displayCounts;
+    rec.entries.sort((a, b) => a.year - b.year || a.etappe - b.etappe);
+  }
+  return m;
+}
+
+function AthleteView({ db, splitsByTid, statsAllYears, runnerIndex, allRunnersList }) {
+  const { meta, statsOverall, etappeGap } = db;
+  const isMobile = useIsMobile();
+  const gapFactorOf = useCallback((etappe) => etappeGap?.[String(etappe)]?.factor || null, [etappeGap]);
+
+  const allRunners = allRunnersList;
+
+  const [q, setQ] = usePersistedState("hk:athlete:q", "");
+  const [selectedKeys, setSelectedKeys] = usePersistedState("hk:athlete:keys", []);
+  const [teamFilters, setTeamFilters] = useState({});
+  const [resultsOpen, setResultsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!selectedKeys.length) return;
+    const valid = selectedKeys.filter((k) => runnerIndex.has(k));
+    if (valid.length !== selectedKeys.length) setSelectedKeys(valid);
+  }, [selectedKeys, runnerIndex, setSelectedKeys]);
+
+  const toggleSelect = useCallback((key) => {
+    setSelectedKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+    setResultsOpen(false);
+  }, [setSelectedKeys]);
+
+  const setRunnerTeamFilter = useCallback((key, tf) => {
+    setTeamFilters((cur) => {
+      const next = { ...cur };
+      if (tf == null) delete next[key];
+      else next[key] = tf;
+      return next;
+    });
+  }, []);
+
+  const matches = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return [];
+    const parts = qq.split(/\s+/).filter(Boolean);
+    const filtered = allRunners.filter((r) => parts.every((p) => r.key.includes(p)));
+    filtered.sort((a, b) => {
+      const aStart = a.key.startsWith(qq) ? 0 : 1;
+      const bStart = b.key.startsWith(qq) ? 0 : 1;
+      if (aStart !== bStart) return aStart - bStart;
+      return b.count - a.count;
+    });
+    return filtered.slice(0, 400);
+  }, [q, allRunners]);
+
+  const enrichEntries = useCallback((entries) => entries.map((e) => {
+    const dist = meta.etappe_distances?.[e.etappe];
+    const sk = `${e.year}-${e.etappe}`;
+    const stat = statsOverall[sk];
+    const pctYear = stat ? percentileOf(stat.sorted, e.split) : null;
+    const rkYear = stat ? rankOf(stat.sorted, e.split) : null;
+    const allArr = statsAllYears?.[e.etappe];
+    const pctAll = allArr ? percentileOf(allArr, e.split) : null;
+    return { ...e, dist, pctYear, rkYear, nYear: stat?.n, pctAll, nAll: allArr?.length };
+  }), [meta, statsOverall, statsAllYears]);
+
+  const computeStats = useCallback((rows) => {
+    if (!rows.length) return null;
+    const pcts = rows.map((r) => r.pctAll).filter((p) => p != null);
+    const paces = rows
+      .filter((r) => r.dist)
+      .map((r) => {
+        const gf = gapFactorOf(r.etappe);
+        const paceSec = (r.split / r.dist) * 1000;
+        const gapPaceSec = gf ? (r.split / (r.dist * gf)) * 1000 : null;
+        return { etappe: r.etappe, year: r.year, split: r.split, paceSec, gapPaceSec, gapFactor: gf };
+      });
+    const bestRow = rows.reduce((b, r) => (b == null || (r.pctAll != null && (b.pctAll == null || r.pctAll < b.pctAll)) ? r : b), null);
+    const bestPace = paces.reduce((b, p) => (b == null || p.paceSec < b.paceSec ? p : b), null);
+    const gapCandidates = paces.filter((p) => p.gapPaceSec != null);
+    const bestGap = gapCandidates.reduce((b, p) => (b == null || p.gapPaceSec < b.gapPaceSec ? p : b), null);
+    const totalKm = rows.reduce((s, r) => s + (r.dist || 0), 0) / 1000;
+    const yrs = [...new Set(rows.map((r) => r.year))].sort();
+    const etappes = [...new Set(rows.map((r) => r.etappe))].sort((a, b) => a - b);
+    return {
+      starts: rows.length,
+      years: yrs,
+      etappes,
+      uniqueEtappes: etappes.length,
+      medianPct: pcts.length ? Math.round(pcts.slice().sort((a, b) => a - b)[Math.floor(pcts.length / 2)]) : null,
+      bestPct: pcts.length ? Math.min(...pcts) : null,
+      bestRow,
+      bestPace,
+      bestGap,
+      totalKm,
+    };
+  }, [gapFactorOf]);
+
+  const runnersData = useMemo(() => {
+    return selectedKeys
+      .map((key, idx) => {
+        const runner = runnerIndex.get(key);
+        if (!runner) return null;
+        const tf = teamFilters[key] || null;
+        const teamsMap = new Map();
+        for (const e of runner.entries) {
+          const k = e.team + "::" + e.bedrift;
+          const cur = teamsMap.get(k);
+          if (cur) cur.count++;
+          else teamsMap.set(k, { team: e.team, bedrift: e.bedrift, count: 1 });
+        }
+        const teams = [...teamsMap.values()].sort((a, b) => b.count - a.count);
+        const filteredEntries = runner.entries.filter((e) => !tf || (e.team === tf.team && e.bedrift === tf.bedrift));
+        const rows = enrichEntries(filteredEntries);
+        const stats = computeStats(rows);
+        return {
+          key,
+          runner,
+          display: runner.display,
+          color: colorForCompareIdx(idx),
+          teams,
+          teamFilter: tf,
+          rows,
+          stats,
+        };
+      })
+      .filter(Boolean);
+  }, [selectedKeys, runnerIndex, teamFilters, enrichEntries, computeStats]);
+
+  const headToHead = useMemo(() => {
+    if (runnersData.length < 2) return [];
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      const perRunner = runnersData.map((rd) => {
+        const rs = rd.rows.filter((r) => r.etappe === e);
+        if (!rs.length) return null;
+        const best = rs.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
+        return { key: rd.key, display: rd.display, color: rd.color, best };
+      });
+      const present = perRunner.filter(Boolean);
+      if (!present.length) continue;
+      out.push({ etappe: e, runners: perRunner, present });
+    }
+    return out;
+  }, [runnersData]);
+
+  const compareBestPctData = useMemo(() => {
+    if (runnersData.length < 2) return [];
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      const row = { etappe: e };
+      let any = false;
+      for (const rd of runnersData) {
+        const pcts = rd.rows.filter((r) => r.etappe === e && r.pctAll != null).map((r) => r.pctAll);
+        if (pcts.length) { row[`k_${rd.key}`] = Math.min(...pcts); any = true; }
+      }
+      if (any) out.push(row);
+    }
+    return out;
+  }, [runnersData]);
+
+  const matchListItem = (r, isSelected, idx) => {
+    const color = isSelected ? colorForCompareIdx(idx) : null;
+    return html`
+      <div
+        key=${r.key}
+        className=${"runner-match" + (isSelected ? " selected" : "")}
+        onClick=${() => toggleSelect(r.key)}
+        style=${{
+          padding: "8px 12px",
+          borderBottom: "1px solid var(--border)",
+          background: isSelected ? "rgba(108,194,112,0.08)" : "transparent",
+          borderLeft: isSelected ? `2px solid ${color}` : "2px solid transparent",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          cursor: "pointer",
+        }}
+      >
+        <div style=${{ flexShrink: 0 }} title=${isSelected ? "Fjern fra sammenligning" : "Legg til i sammenligning"}>
+          <span
+            className=${"compare-toggle" + (isSelected ? " on" : "")}
+            style=${isSelected ? { background: color, borderColor: color, color: "var(--bg)" } : null}
+          >${isSelected ? "✓" : "+"}</span>
+        </div>
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px" }}>
+            <span style=${{ fontWeight: 600, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              ${r.display}
+              ${r.ambiguous ? html`<span title="Vanlig fornavn eller mange lag — kan være flere personer" style=${{ marginLeft: "6px", fontSize: "10px", color: "var(--muted)", fontWeight: 400 }}>⚠</span>` : null}
+            </span>
+            <span style=${{ fontSize: "11px", color: "var(--muted)", fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>${r.count}×</span>
+          </div>
+          <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", display: "flex", gap: "8px" }}>
+            <span>${r.yearMin === r.yearMax ? r.yearMin : `${r.yearMin}–${r.yearMax}`}</span>
+            <span>·</span>
+            <span>${r.etappes.length} etappe${r.etappes.length > 1 ? "r" : ""}</span>
+            ${r.teamCount > 1 ? html`<span>·</span><span>${r.teamCount} lag</span>` : null}
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  const athleteStrip = (rd) => {
+    const { key, color, display, stats, teams, teamFilter } = rd;
+    return html`
+      <div className="athlete-strip" key=${key} style=${{ "--swatch": color }}>
+        <div className="athlete-strip-name">
+          <span className="dot" style=${{ background: color }}></span>
+          <span className="display" title=${display}>${display}</span>
+          <button className="subtle x-btn" onClick=${() => toggleSelect(key)} title="Fjern fra sammenligning">✕</button>
+        </div>
+        ${stats ? html`
+          <div className="athlete-strip-kpis">
+            <div className="kpi"><span className="lbl">Starter</span><span className="val">${stats.starts}</span></div>
+            <div className="kpi"><span className="lbl">År</span><span className="val">${stats.years.length === 1 ? stats.years[0] : `${stats.years[0]}–${stats.years[stats.years.length - 1]}`}</span></div>
+            <div className="kpi"><span className="lbl">Median</span><span className="val">${stats.medianPct != null ? html`<span className=${"percent-pill " + pillClass(stats.medianPct)}>${stats.medianPct}%</span>` : "—"}</span></div>
+            <div className="kpi"><span className="lbl">Beste</span><span className="val">${stats.bestPct != null ? html`<span className=${"percent-pill " + pillClass(stats.bestPct)}>${stats.bestPct}%</span>` : "—"}</span></div>
+            <div className="kpi"><span className="lbl">${paceLabel("Raskeste pace", "below")}</span><span className="val">${stats.bestPace ? fmtPace(stats.bestPace.split, meta.etappe_distances[stats.bestPace.etappe]) : "—"}</span></div>
+            <div className="kpi"><span className="lbl">${gapLabel("Raskeste GAP", "below")}</span><span className="val">${stats.bestGap ? fmtPaceGap(stats.bestGap.split, meta.etappe_distances[stats.bestGap.etappe], stats.bestGap.gapFactor) : "—"}</span></div>
+            <div className="kpi"><span className="lbl">Km totalt</span><span className="val">${stats.totalKm.toFixed(1)}</span></div>
+          </div>
+        ` : html`<div className="athlete-strip-empty">Ingen starter matcher gjeldende filter.</div>`}
+        ${teams.length > 1 ? html`
+          <div className="athlete-strip-teams">
+            <span className="lbl">Lag:</span>
+            <button className=${"subtle " + (teamFilter == null ? "active" : "")} onClick=${() => setRunnerTeamFilter(key, null)}>Alle</button>
+            ${teams.map((t) => html`
+              <button key=${t.team + t.bedrift}
+                className=${"subtle " + (teamFilter && teamFilter.team === t.team && teamFilter.bedrift === t.bedrift ? "active" : "")}
+                onClick=${() => setRunnerTeamFilter(key, t)}>${t.team} (${t.count})</button>
+            `)}
+          </div>
+        ` : null}
+      </div>
+    `;
+  };
+
+  const [unifiedSort, toggleUnifiedSort] = useSort("year", "desc");
+  const unifiedRows = useMemo(() => {
+    const out = [];
+    for (const rd of runnersData) {
+      for (const r of rd.rows) {
+        const gf = gapFactorOf(r.etappe);
+        out.push({ ...r, _akey: rd.key, _acolor: rd.color, _adisplay: rd.display, _gapFactor: gf });
+      }
+    }
+    const accessors = {
+      runner: (r) => r._adisplay,
+      year: (r) => r.year,
+      etappe: (r) => r.etappe,
+      team: (r) => r.team || "",
+      time: (r) => r.split,
+      pace: (r) => (r.dist ? r.split / r.dist : null),
+      gap: (r) => (r.dist && r._gapFactor ? r.split / (r.dist * r._gapFactor) : null),
+      pctYear: (r) => r.pctYear,
+      pctAll: (r) => r.pctAll,
+    };
+    return sortRows(out, unifiedSort, accessors);
+  }, [runnersData, gapFactorOf, unifiedSort]);
+
+  const unifiedTable = unifiedRows.length === 0 ? null : (isMobile
+    ? html`
+        <div className="etappe-cards" style=${{ padding: 0 }}>
+          ${unifiedRows.map((r) => html`
+            <div className="etappe-card" key=${r._akey + "-" + r.tid + "-" + r.etappe} style=${{ borderLeft: `3px solid ${r._acolor}` }}>
+              <div className="etappe-card-head">
+                <div className="etappe-card-num">${r.etappe}</div>
+                <div className="etappe-card-title">
+                  <div className="etappe-card-name" style=${{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style=${{ width: "8px", height: "8px", borderRadius: "50%", background: r._acolor, flexShrink: 0 }}></span>
+                    ${r._adisplay}
+                  </div>
+                  <div className="etappe-card-runner"><span className=${"chip year-" + r.year}>${r.year}</span> ${ETAPPE_NAMES[r.etappe]} · ${r.team}</div>
+                </div>
+                <div className="etappe-card-time">
+                  <div className="t">${fmtTime(r.split)}</div>
+                  <div className="p">${fmtPace(r.split, r.dist)}</div>
+                </div>
+              </div>
+              <div className="etappe-card-stats">
+                <div className="s"><div className="lbl">${gapLabel("GAP", "below")}</div><div className="val">${r._gapFactor ? fmtPaceGap(r.split, r.dist, r._gapFactor) : "—"}</div></div>
+                <div className="s"><div className="lbl">Pct ${r.year}</div><div className="val">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</div></div>
+                <div className="s"><div className="lbl">Pct alle år</div><div className="val">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</div></div>
+              </div>
+            </div>
+          `)}
+        </div>
+      `
+    : html`
+        <div style=${{ overflowX: "auto" }}>
+          <table className="etappes-table">
+            <thead>
+              <tr>
+                <${SortHeader} label="Løper" sortKey="runner" sort=${unifiedSort} onSort=${toggleUnifiedSort} />
+                <${SortHeader} label="År" sortKey="year" sort=${unifiedSort} onSort=${toggleUnifiedSort} defaultDir="desc" />
+                <${SortHeader} label="Etappe" sortKey="etappe" sort=${unifiedSort} onSort=${toggleUnifiedSort} />
+                <${SortHeader} label="Lag" sortKey="team" sort=${unifiedSort} onSort=${toggleUnifiedSort} />
+                <${SortHeader} label="Tid" sortKey="time" sort=${unifiedSort} onSort=${toggleUnifiedSort} right=${true} />
+                <${SortHeader} label=${paceLabel("Pace", "below")} sortKey="pace" sort=${unifiedSort} onSort=${toggleUnifiedSort} right=${true} />
+                <${SortHeader} label=${gapLabel("GAP", "below")} sortKey="gap" sort=${unifiedSort} onSort=${toggleUnifiedSort} right=${true} />
+                <${SortHeader} label="Pct året" sortKey="pctYear" sort=${unifiedSort} onSort=${toggleUnifiedSort} right=${true} />
+                <${SortHeader} label="Pct alle år" sortKey="pctAll" sort=${unifiedSort} onSort=${toggleUnifiedSort} right=${true} />
+              </tr>
+            </thead>
+            <tbody>
+              ${unifiedRows.map((r) => html`
+                <tr key=${r._akey + "-" + r.tid + "-" + r.etappe}>
+                  <td style=${{ borderLeft: `3px solid ${r._acolor}`, paddingLeft: "10px" }}>
+                    <span style=${{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <span style=${{ width: "8px", height: "8px", borderRadius: "50%", background: r._acolor, flexShrink: 0 }}></span>
+                      <span style=${{ fontFamily: "DM Sans, sans-serif", fontWeight: 600 }}>${r._adisplay}</span>
+                    </span>
+                  </td>
+                  <td><span className=${"chip year-" + r.year}>${r.year}</span></td>
+                  <td>${r.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe]}</span></td>
+                  <td className="team-name" style=${{ maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${r.team}</td>
+                  <td className="right">${fmtTime(r.split)}</td>
+                  <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split, r.dist)}</td>
+                  <td className="right">${r._gapFactor ? fmtPaceGap(r.split, r.dist, r._gapFactor) : html`<span className="muted">—</span>`}</td>
+                  <td className="right">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</td>
+                  <td className="right">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      `);
+
+  const headToHeadSection = (runnersData.length >= 2 && headToHead.length) ? (() => {
+    const allRunners = runnersData.map((rd) => ({ key: rd.key, display: rd.display, color: rd.color }));
+    const chartData = headToHead.map((h) => {
+      const row = { etappe: h.etappe };
+      for (const r of h.runners) {
+        if (r) row[`k_${r.key}`] = r.best.split;
+      }
+      return row;
+    });
+    return html`
+      <div className="chart-wrap" style=${{ margin: isMobile ? 0 : "0 12px 12px" }}>
+        <h3>Hode-mot-hode (${allRunners.length} løpere)</h3>
+        <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste tid hver løper har på hver etappe (alle år). "—" = ikke løpt.</div>
+        <${ResponsiveContainer} width="100%" height=${280}>
+          <${BarChart} data=${chartData} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+            <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} />
+            <${YAxis} stroke="#8b949e" fontSize=${12} tickFormatter=${(v) => fmtTime(v)} />
+            <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => fmtTime(v)} />
+            <${Legend} />
+            ${allRunners.map((a) => html`<${Bar} key=${a.key} dataKey=${`k_${a.key}`} name=${a.display} fill=${a.color} />`)}
+          <//>
+        <//>
+        <div style=${{ overflowX: "auto", marginTop: "12px" }}>
+          <table className="etappes-table">
+            <thead>
+              <tr>
+                <th>Etappe</th>
+                ${allRunners.map((a) => html`
+                  <th key=${a.key} className="right" style=${{ borderBottom: `2px solid ${a.color}` }}>${a.display}</th>
+                `)}
+                ${allRunners.length === 2 ? html`<th className="right">Diff</th>` : null}
+              </tr>
+            </thead>
+            <tbody>
+              ${headToHead.map((h) => {
+                const byKey = new Map(h.runners.filter(Boolean).map((r) => [r.key, r]));
+                const fastest = h.present.reduce((b, r) => (b == null || r.best.split < b.best.split ? r : b), null);
+                let diffCell = null;
+                if (allRunners.length === 2) {
+                  const a0 = byKey.get(allRunners[0].key);
+                  const a1 = byKey.get(allRunners[1].key);
+                  if (a0 && a1) {
+                    const diff = a0.best.split - a1.best.split;
+                    diffCell = html`<td className="right" style=${{ color: diff < 0 ? "var(--good)" : diff > 0 ? "var(--bad)" : undefined, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>${diff > 0 ? "+" : ""}${diff.toFixed(0)}s</td>`;
+                  } else {
+                    diffCell = html`<td className="right muted">—</td>`;
+                  }
+                }
+                return html`
+                  <tr key=${h.etappe}>
+                    <td>${h.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[h.etappe]}</span></td>
+                    ${allRunners.map((a) => {
+                      const r = byKey.get(a.key);
+                      if (!r) return html`<td key=${a.key} className="right muted">—</td>`;
+                      const isFastest = fastest && r.key === fastest.key && h.present.length > 1;
+                      return html`
+                        <td key=${a.key} className="right" style=${{ fontWeight: isFastest ? 700 : undefined, color: isFastest ? a.color : undefined }}>
+                          ${fmtTime(r.best.split)} <span style=${{ color: "var(--muted)", fontSize: "11px", fontWeight: 400 }}>(${r.best.year})</span>
+                        </td>
+                      `;
+                    })}
+                    ${diffCell}
+                  </tr>
+                `;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      ${compareBestPctData.length ? html`
+        <div className="chart-wrap" style=${{ margin: isMobile ? 0 : "0 12px 12px" }}>
+          <h3>Beste percentil per etappe</h3>
+          <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste prestasjon hver løper har på etappen (alle år, mot hele datasettet). Lavere = bedre.</div>
+          <${ResponsiveContainer} width="100%" height=${260}>
+            <${LineChart} data=${compareBestPctData} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+              <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} type="number" domain=${[1, 15]} ticks=${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]} />
+              <${YAxis} stroke="#8b949e" fontSize=${12} reversed=${true} domain=${[0, 100]} tickFormatter=${(v) => v + "%"} />
+              <${ReferenceLine} y=${50} stroke="#5e5444" strokeDasharray="2 4" />
+              <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => v + "%"} />
+              <${Legend} />
+              ${runnersData.map((rd) => html`<${Line} key=${rd.key} type="monotone" dataKey=${`k_${rd.key}`} name=${rd.display} stroke=${rd.color} strokeWidth=${2} connectNulls=${true} dot=${{ r: 4 }} />`)}
+            <//>
+          <//>
+        </div>
+      ` : null}
+    `;
+  })() : null;
+
+  const summarySection = runnersData.length > 0 ? html`
+    <div className="detail" style=${{ margin: isMobile ? 0 : "12px", borderRadius: isMobile ? 0 : undefined }}>
+      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+        ${isMobile ? html`
+          <button className="td-back" onClick=${() => setSelectedKeys([])} aria-label="Tilbake til søk">‹</button>
+        ` : null}
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <h2 style=${{ margin: 0 }}>${runnersData.length === 1 ? runnersData[0].display : `${runnersData.length} løpere sammenlignes`}</h2>
+          <div className="sub">Klikk en løper i søkelista for å legge til eller fjerne.</div>
+        </div>
+        ${runnersData.length > 1 ? html`<button className="subtle" onClick=${() => setSelectedKeys([])}>✕ Tøm alle</button>` : null}
+      </div>
+      <div className="athlete-strip-list">
+        ${runnersData.map((rd) => athleteStrip(rd))}
+      </div>
+    </div>
+  ` : null;
+
+  const resultsSection = runnersData.length > 0 ? html`
+    <div className="chart-wrap" style=${{ margin: isMobile ? 0 : "0 12px 12px" }}>
+      <h3>Alle starter (${unifiedRows.length})</h3>
+      <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Sortert nyeste år først, så etappe. Rader fargekodet per løper.</div>
+      ${unifiedTable}
+    </div>
+  ` : null;
+
+  const emptyState = html`
+    <div style=${{ padding: "32px 20px", color: "var(--muted)", fontSize: "14px", maxWidth: "520px" }}>
+      <div style=${{ fontFamily: "Fraunces, Georgia, serif", fontSize: "20px", color: "var(--text)", marginBottom: "8px" }}>Søk etter en løper</div>
+      <p>Skriv inn et navn i søkefeltet. Cirka halvparten av løperne i datasettet har registrert navn (2022–2026). Vanlige fornavn kan tilhøre flere personer — bruk lag-filter på kortet for å skille.</p>
+      <p style=${{ marginTop: "12px" }}>Klikk på flere løpere for å legge dem til — alle vises sidestilt med samme detaljnivå, og du får hode-mot-hode-sammenligning automatisk når to eller flere er valgt.</p>
+    </div>
+  `;
+
+  const showResults = resultsOpen && q.trim();
+  const searchPanel = html`
+    <div className="field">
+      <label>Søk løper</label>
+      <input
+        type="text"
+        placeholder="navn…"
+        value=${q}
+        onInput=${(e) => { setQ(e.target.value); setResultsOpen(true); }}
+        onFocus=${() => { if (q.trim()) setResultsOpen(true); }}
+        autoFocus=${runnersData.length === 0 && !isMobile}
+      />
+      <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+        ${q.trim() ? `${matches.length.toLocaleString("no")} treff` : `${allRunners.length.toLocaleString("no")} unike navn totalt`}
+        ${runnersData.length > 0 ? html` · klikk = legg til / fjern` : null}
+      </div>
+    </div>
+    <div style=${{
+      flex: isMobile ? "0 1 auto" : 1,
+      maxHeight: isMobile && showResults ? "50vh" : undefined,
+      minHeight: 0,
+      overflow: "auto",
+      marginTop: "4px",
+      border: showResults ? "1px solid var(--border)" : "none",
+      borderRadius: "4px",
+    }}>
+      ${!showResults
+        ? null
+        : matches.length === 0
+        ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
+        : matches.map((r) => {
+            const idx = selectedKeys.indexOf(r.key);
+            return matchListItem(r, idx >= 0, idx);
+          })}
+    </div>
+  `;
+
+  return html`
+    <${React.Fragment}>
+      <div className="sidebar" style=${{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        ${searchPanel}
+      </div>
+      <div className="content" style=${{ padding: 0, overflow: "auto" }}>
+        ${isMobile ? html`
+          <div className="athlete-search-mobile" style=${{ padding: "12px", borderBottom: "1px solid var(--border)", background: "var(--bg-2)", display: "flex", flexDirection: "column" }}>
+            ${searchPanel}
+          </div>
+        ` : null}
+        ${runnersData.length === 0
+          ? emptyState
+          : html`
+              <${React.Fragment}>
+                ${summarySection}
+                ${resultsSection}
+                ${headToHeadSection}
+              <//>
+            `}
+      </div>
+    <//>
+  `;
+}
+
+
 function App() {
   const [db, setDb] = useState(null);
   const [view, setView] = usePersistedState("hk:view", "teams");
@@ -2885,7 +3774,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Auto-close sidebar when switching tabs on mobile.
   useEffect(() => { if (isMobile) setSidebarOpen(false); }, [view, isMobile]);
-  const hasSidebar = view === "teams" || view === "etappesok" || view === "etapper";
+  const hasSidebar = view === "teams" || view === "etappesok" || view === "etapper" || view === "atlet";
   const toggleCompare = useCallback(
     (tid) =>
       setCompareTids((cur) => (cur.includes(tid) ? cur.filter((t) => t !== tid) : [...cur, tid])),
@@ -2987,6 +3876,31 @@ function App() {
     return out;
   }, [db]);
 
+  // Runner index for Atlet view — computed once at App level so tab switches don't rebuild it.
+  const runnerIndex = useMemo(() => (db ? buildRunnerIndex(db) : new Map()), [db]);
+  const allRunnersList = useMemo(() => {
+    const out = [];
+    for (const [key, rec] of runnerIndex) {
+      const years = [...new Set(rec.entries.map((e) => e.year))].sort();
+      const etappes = [...new Set(rec.entries.map((e) => e.etappe))].sort((a, b) => a - b);
+      const teams = [...new Set(rec.entries.map((e) => e.team))];
+      const isAmbiguous = rec.display.trim().split(/\s+/).length < 2 || teams.length > 3;
+      out.push({
+        key,
+        display: rec.display,
+        count: rec.entries.length,
+        years,
+        yearMin: years[0],
+        yearMax: years[years.length - 1],
+        etappes,
+        teamCount: teams.length,
+        ambiguous: isAmbiguous,
+      });
+    }
+    out.sort((a, b) => a.display.localeCompare(b.display, "no"));
+    return out;
+  }, [runnerIndex]);
+
   const sameTeamIndex = useMemo(() => {
     if (!db) return new Map();
     const m = new Map();
@@ -3040,7 +3954,7 @@ function App() {
         </svg>
         <div className="splash-status">Laster datasett</div>
         <div className="splash-bar"><span /></div>
-        <div className="splash-meta">25 566 lag · 382 454 splits · 2019, 2022–2026</div>
+        <div className="splash-meta">22 099 lag · 330 460 splits · 2022–2026</div>
       </div>
     </div>
   `;
@@ -3108,6 +4022,8 @@ function App() {
           ? html`<${EtapperView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
           : view === "etappesok"
           ? html`<${EtappeSokView} db=${db} splitsByTid=${splitsByTid} setSelected=${setSelected} setView=${setView} statsAllYears=${statsAllYears} compareTids=${compareTids} toggleCompare=${toggleCompare} etappePreselect=${etappePreselect} clearPreselect=${() => setEtappePreselect(null)} />`
+          : view === "atlet"
+          ? html`<${AthleteView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} runnerIndex=${runnerIndex} allRunnersList=${allRunnersList} />`
           : view === "rute"
           ? html`<${MapView} db=${db} statsAllYears=${statsAllYears} splitsByTid=${splitsByTid} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
           : html`<${CompareView} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} clearCompare=${clearCompare} cumIndex=${cumIndex} statsAllYears=${statsAllYears} setSelected=${setSelected} setView=${setView} recentCompares=${recentCompares} restoreCompare=${restoreCompare} removeRecentCompare=${removeRecentCompare} />`}
