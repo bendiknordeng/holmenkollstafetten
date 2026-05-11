@@ -69,19 +69,93 @@ const TEAM_FIELDS = ["tid", "year", "bib", "team", "bedrift", "klasse_id", "tota
   document.addEventListener("touchstart", handler, { passive: true, capture: true });
 })();
 
+// Load all datasets in a Web Worker so the splash animation (SMIL animateMotion,
+// CSS bar) stays smooth — JSON.parse on the 10MB splits.json would otherwise
+// block the main thread for hundreds of ms and freeze the loader.
+const LOADER_SOURCES = [
+  ["meta", "data/meta.json", false],
+  ["teams", "data/teams.json", false],
+  ["splits", "data/splits.json", false],
+  ["teamRank", "data/team_rank.json", false],
+  ["statsOverall", "data/stats_overall.json", false],
+  ["statsKlasse", "data/stats_klasse.json", false],
+  ["etappeRoutes", "data/etappe_routes.json", true],
+  ["etappeElevation", "data/etappe_elevation.json", true],
+];
+
+function loadAllInWorker() {
+  const base = new URL(".", document.baseURI).href;
+  const workerSrc = `
+    const BASE = ${JSON.stringify(base)};
+    self.onmessage = async (e) => {
+      const sources = e.data;
+      try {
+        const results = await Promise.all(sources.map(async ([key, path, optional]) => {
+          try {
+            const r = await fetch(BASE + path);
+            if (!r.ok) return [key, optional ? {} : null];
+            return [key, await r.json()];
+          } catch (err) {
+            if (optional) return [key, {}];
+            throw err;
+          }
+        }));
+        self.postMessage({ ok: true, results });
+      } catch (err) {
+        self.postMessage({ ok: false, error: String(err && err.message || err) });
+      }
+    };
+  `;
+  const blob = new Blob([workerSrc], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+  const worker = new Worker(url);
+  return new Promise((resolve, reject) => {
+    worker.onmessage = (e) => {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      if (e.data.ok) {
+        const out = {};
+        for (const [k, v] of e.data.results) out[k] = v;
+        resolve(out);
+      } else {
+        reject(new Error(e.data.error));
+      }
+    };
+    worker.onerror = (err) => {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+    worker.postMessage(LOADER_SOURCES);
+  });
+}
+
+async function loadAllOnMain() {
+  const entries = await Promise.all(LOADER_SOURCES.map(async ([key, path, optional]) => {
+    try {
+      const r = await fetch(path);
+      if (!r.ok) return [key, optional ? {} : null];
+      return [key, await r.json()];
+    } catch (err) {
+      if (optional) return [key, {}];
+      throw err;
+    }
+  }));
+  const out = {};
+  for (const [k, v] of entries) out[k] = v;
+  return out;
+}
+
 async function loadAll() {
-  const [meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation] = await Promise.all([
-    fetch("data/meta.json").then((r) => r.json()),
-    fetch("data/teams.json").then((r) => r.json()),
-    fetch("data/splits.json").then((r) => r.json()),
-    fetch("data/team_rank.json").then((r) => r.json()),
-    fetch("data/stats_overall.json").then((r) => r.json()),
-    fetch("data/stats_klasse.json").then((r) => r.json()),
-    fetch("data/etappe_routes.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-    fetch("data/etappe_elevation.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-  ]);
-  const etappeGap = buildGapFactors(etappeElevation);
-  return { meta, teams, splits, teamRank, statsOverall, statsKlasse, etappeRoutes, etappeElevation, etappeGap };
+  let data;
+  try {
+    data = typeof Worker !== "undefined" ? await loadAllInWorker() : await loadAllOnMain();
+  } catch (err) {
+    console.warn("Worker-based load failed, falling back to main thread:", err);
+    data = await loadAllOnMain();
+  }
+  data.etappeGap = buildGapFactors(data.etappeElevation || {});
+  return data;
 }
 
 // ---- Helpers --------------------------------------------------------------
