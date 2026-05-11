@@ -344,6 +344,7 @@ function Topbar({ view, setView, n, compareCount, hasSidebar, sidebarOpen, setSi
         <button className=${view === "teams" ? "active" : ""} onClick=${() => setView("teams")}>Lag</button>
         <button className=${view === "etapper" ? "active" : ""} onClick=${() => setView("etapper")}>Etapper</button>
         <button className=${view === "etappesok" ? "active" : ""} onClick=${() => setView("etappesok")}>Etappe-søk</button>
+        <button className=${view === "atlet" ? "active" : ""} onClick=${() => setView("atlet")}>Atlet</button>
         <button className=${view === "rute" ? "active" : ""} onClick=${() => setView("rute")}>Rute</button>
         <button className=${view === "compare" ? "active" : ""} onClick=${() => setView("compare")}>
           ${isMobile ? "Sammenlign" : "Sammenligning"}${compareCount ? html` <span className="tab-badge">${compareCount}</span>` : null}
@@ -2972,6 +2973,511 @@ function CompareView({ db, splitsByTid, compareTids, toggleCompare, clearCompare
   `;
 }
 
+// ---- Athlete (individual runner) view ------------------------------------
+
+function buildRunnerIndex(db) {
+  // Map<lowercase exact name, { display, entries: [{ tid, year, etappe, split, total, team, bedrift, klasse_id }] }>
+  const m = new Map();
+  for (const s of db.splits) {
+    const raw = (s[4] || "").trim();
+    if (!raw) continue;
+    if (s[2] == null) continue;
+    const key = raw.toLowerCase();
+    const t = db.teams[s[0]];
+    if (!t) continue;
+    let rec = m.get(key);
+    if (!rec) {
+      rec = { display: raw, displayCounts: {}, entries: [] };
+      m.set(key, rec);
+    }
+    rec.displayCounts[raw] = (rec.displayCounts[raw] || 0) + 1;
+    rec.entries.push({
+      tid: s[0],
+      year: t[1],
+      etappe: s[1],
+      split: s[2],
+      total: s[3],
+      team: t[3],
+      bedrift: t[4],
+      klasse_id: t[5],
+    });
+  }
+  // Pick most common casing as canonical display.
+  for (const rec of m.values()) {
+    let bestName = rec.display;
+    let bestN = 0;
+    for (const [name, n] of Object.entries(rec.displayCounts)) {
+      if (n > bestN) { bestN = n; bestName = name; }
+    }
+    rec.display = bestName;
+    delete rec.displayCounts;
+    rec.entries.sort((a, b) => a.year - b.year || a.etappe - b.etappe);
+  }
+  return m;
+}
+
+function AthleteView({ db, splitsByTid, statsAllYears }) {
+  const { meta, statsOverall } = db;
+  const isMobile = useIsMobile();
+  const runnerIndex = useMemo(() => buildRunnerIndex(db), [db]);
+
+  const allRunners = useMemo(() => {
+    const out = [];
+    for (const [key, rec] of runnerIndex) {
+      const years = [...new Set(rec.entries.map((e) => e.year))].sort();
+      const etappes = [...new Set(rec.entries.map((e) => e.etappe))].sort((a, b) => a - b);
+      const teams = [...new Set(rec.entries.map((e) => e.team))];
+      const isAmbiguous = rec.display.trim().split(/\s+/).length < 2 || teams.length > 3;
+      out.push({
+        key,
+        display: rec.display,
+        count: rec.entries.length,
+        years,
+        yearMin: years[0],
+        yearMax: years[years.length - 1],
+        etappes,
+        teamCount: teams.length,
+        ambiguous: isAmbiguous,
+      });
+    }
+    out.sort((a, b) => a.display.localeCompare(b.display, "no"));
+    return out;
+  }, [runnerIndex]);
+
+  const [q, setQ] = usePersistedState("hk:athlete:q", "");
+  const [selectedKey, setSelectedKey] = usePersistedState("hk:athlete:key", null);
+  const [compareKey, setCompareKey] = usePersistedState("hk:athlete:compareKey", null);
+  const [teamFilter, setTeamFilter] = useState(null);
+  const [pickingCompare, setPickingCompare] = useState(false);
+
+  // Reset team filter when athlete changes.
+  useEffect(() => { setTeamFilter(null); }, [selectedKey]);
+
+  const matches = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return [];
+    const parts = qq.split(/\s+/).filter(Boolean);
+    const filtered = allRunners.filter((r) => parts.every((p) => r.key.includes(p)));
+    // Rank: exact match > startsWith > contains, then by count desc.
+    filtered.sort((a, b) => {
+      const aStart = a.key.startsWith(qq) ? 0 : 1;
+      const bStart = b.key.startsWith(qq) ? 0 : 1;
+      if (aStart !== bStart) return aStart - bStart;
+      return b.count - a.count;
+    });
+    return filtered.slice(0, 400);
+  }, [q, allRunners]);
+
+  const selected = selectedKey ? runnerIndex.get(selectedKey) : null;
+  const compare = compareKey && compareKey !== selectedKey ? runnerIndex.get(compareKey) : null;
+
+  // Within selected runner: derive team list for filter chips.
+  const selectedTeams = useMemo(() => {
+    if (!selected) return [];
+    const m = new Map();
+    for (const e of selected.entries) {
+      const k = e.team + "::" + e.bedrift;
+      const cur = m.get(k);
+      if (cur) cur.count++;
+      else m.set(k, { team: e.team, bedrift: e.bedrift, count: 1 });
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count);
+  }, [selected]);
+
+  // Rows (entries) for selected runner, with percentiles + pace.
+  const selectedRows = useMemo(() => {
+    if (!selected) return [];
+    return selected.entries
+      .filter((e) => !teamFilter || (e.team === teamFilter.team && e.bedrift === teamFilter.bedrift))
+      .map((e) => {
+        const dist = meta.etappe_distances?.[e.etappe];
+        const sk = `${e.year}-${e.etappe}`;
+        const stat = statsOverall[sk];
+        const pctYear = stat ? percentileOf(stat.sorted, e.split) : null;
+        const rkYear = stat ? rankOf(stat.sorted, e.split) : null;
+        const allArr = statsAllYears?.[e.etappe];
+        const pctAll = allArr ? percentileOf(allArr, e.split) : null;
+        return { ...e, dist, pctYear, rkYear, nYear: stat?.n, pctAll, nAll: allArr?.length };
+      });
+  }, [selected, teamFilter, meta, statsOverall, statsAllYears]);
+
+  // Aggregate stats for headline.
+  const stats = useMemo(() => {
+    if (!selectedRows.length) return null;
+    const pcts = selectedRows.map((r) => r.pctAll).filter((p) => p != null);
+    const paces = selectedRows
+      .filter((r) => r.dist)
+      .map((r) => ({ etappe: r.etappe, paceSec: (r.split / r.dist) * 1000, year: r.year, split: r.split }));
+    const bestRow = selectedRows.reduce((best, r) => (best == null || (r.pctAll != null && (best.pctAll == null || r.pctAll < best.pctAll)) ? r : best), null);
+    const bestPace = paces.reduce((b, p) => (b == null || p.paceSec < b.paceSec ? p : b), null);
+    const totalKm = selectedRows.reduce((s, r) => s + (r.dist || 0), 0) / 1000;
+    const yrs = [...new Set(selectedRows.map((r) => r.year))].sort();
+    const etappes = [...new Set(selectedRows.map((r) => r.etappe))].sort((a, b) => a - b);
+    return {
+      starts: selectedRows.length,
+      years: yrs,
+      etappes,
+      uniqueEtappes: etappes.length,
+      medianPct: pcts.length ? Math.round(pcts.slice().sort((a, b) => a - b)[Math.floor(pcts.length / 2)]) : null,
+      bestPct: pcts.length ? Math.min(...pcts) : null,
+      bestRow,
+      bestPace,
+      totalKm,
+    };
+  }, [selectedRows]);
+
+  // Chart: percentile per etappe per year (line per year, x = etappe).
+  const trendData = useMemo(() => {
+    if (!selectedRows.length) return [];
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      const row = { etappe: e };
+      const yrs = [...new Set(selectedRows.map((r) => r.year))];
+      for (const y of yrs) {
+        const hit = selectedRows.find((r) => r.etappe === e && r.year === y);
+        if (hit) row[`y${y}`] = hit.pctAll;
+      }
+      out.push(row);
+    }
+    return out;
+  }, [selectedRows]);
+
+  // Comparison data — both athletes' splits keyed by (year, etappe).
+  const compareRows = useMemo(() => {
+    if (!compare) return [];
+    return compare.entries.map((e) => {
+      const dist = meta.etappe_distances?.[e.etappe];
+      const sk = `${e.year}-${e.etappe}`;
+      const stat = statsOverall[sk];
+      const pctYear = stat ? percentileOf(stat.sorted, e.split) : null;
+      const allArr = statsAllYears?.[e.etappe];
+      const pctAll = allArr ? percentileOf(allArr, e.split) : null;
+      return { ...e, dist, pctYear, pctAll };
+    });
+  }, [compare, meta, statsOverall, statsAllYears]);
+
+  // Head-to-head: same etappe (any year), best split each.
+  const headToHead = useMemo(() => {
+    if (!compare || !selected) return [];
+    const out = [];
+    for (let e = 1; e <= 15; e++) {
+      const mineRows = selectedRows.filter((r) => r.etappe === e);
+      const theirsRows = compareRows.filter((r) => r.etappe === e);
+      if (!mineRows.length || !theirsRows.length) continue;
+      const mineBest = mineRows.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
+      const theirsBest = theirsRows.reduce((b, r) => (b == null || r.split < b.split ? r : b), null);
+      out.push({ etappe: e, mine: mineBest, theirs: theirsBest, diff: mineBest.split - theirsBest.split });
+    }
+    return out;
+  }, [selected, compare, selectedRows, compareRows]);
+
+  const yearsInUse = useMemo(() => {
+    if (!selectedRows.length) return [];
+    return [...new Set(selectedRows.map((r) => r.year))].sort();
+  }, [selectedRows]);
+
+  const yearColor = (y) => ({
+    2014: "#6b7280", 2015: "#8b90a0", 2016: "#a39e6e",
+    2022: "#5fa8d3", 2023: "#e2a13c", 2024: "#e4574a", 2025: "#6cc270", 2026: "#f4cf3a",
+  }[y] || "#f4cf3a");
+
+  const matchListItem = (r, isSelectedRow, isCompareRow, onClick) => html`
+    <div
+      key=${r.key}
+      onClick=${onClick}
+      className=${"runner-match" + (isSelectedRow ? " selected" : "") + (isCompareRow ? " compared" : "")}
+      style=${{
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        cursor: "pointer",
+        background: isSelectedRow ? "rgba(244,207,58,0.10)" : isCompareRow ? "rgba(108,194,112,0.08)" : "transparent",
+        borderLeft: isSelectedRow ? "2px solid var(--accent)" : isCompareRow ? "2px solid var(--good)" : "2px solid transparent",
+      }}
+    >
+      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px" }}>
+        <span style=${{ fontWeight: 600, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          ${r.display}
+          ${r.ambiguous ? html`<span title="Vanlig fornavn eller mange lag — kan være flere personer" style=${{ marginLeft: "6px", fontSize: "10px", color: "var(--muted)", fontWeight: 400 }}>⚠</span>` : null}
+        </span>
+        <span style=${{ fontSize: "11px", color: "var(--muted)", fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>${r.count}×</span>
+      </div>
+      <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", display: "flex", gap: "8px" }}>
+        <span>${r.yearMin === r.yearMax ? r.yearMin : `${r.yearMin}–${r.yearMax}`}</span>
+        <span>·</span>
+        <span>${r.etappes.length} etappe${r.etappes.length > 1 ? "r" : ""}</span>
+        ${r.teamCount > 1 ? html`<span>·</span><span>${r.teamCount} lag</span>` : null}
+      </div>
+    </div>
+  `;
+
+  const profile = (selected && stats) ? html`
+    <div className="detail" style=${{ margin: isMobile ? 0 : "12px", borderRadius: isMobile ? 0 : undefined }}>
+      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+        ${isMobile ? html`
+          <button className="td-back" onClick=${() => setSelectedKey(null)} aria-label="Tilbake til søk">‹</button>
+        ` : null}
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <h2 style=${{ margin: 0 }}>${selected.display}</h2>
+          <div className="sub">
+            ${stats.starts} ${stats.starts === 1 ? "start" : "starter"} ·
+            ${stats.years.length === 1 ? ` ${stats.years[0]}` : ` ${stats.years[0]}–${stats.years[stats.years.length - 1]} (${stats.years.length} år)`} ·
+            ${stats.uniqueEtappes} unike etappe${stats.uniqueEtappes > 1 ? "r" : ""} ·
+            ${stats.totalKm.toFixed(1)} km totalt
+          </div>
+        </div>
+        <div style=${{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          ${!compareKey
+            ? html`<button className=${pickingCompare ? "primary" : "subtle"} onClick=${() => setPickingCompare((s) => !s)}>${pickingCompare ? "Velg en til i lista" : "+ Sammenlign med …"}</button>`
+            : html`<button className="subtle" onClick=${() => { setCompareKey(null); setPickingCompare(false); }}>✕ Avslutt sammenligning</button>`}
+          <button className="subtle" onClick=${() => setSelectedKey(null)}>Lukk ✕</button>
+        </div>
+      </div>
+
+      ${selectedTeams.length > 1 ? html`
+        <div className="field" style=${{ marginTop: "12px" }}>
+          <label>Lag (filtrer hvis flere personer deler dette navnet)</label>
+          <div className="chips">
+            <button className=${"subtle " + (teamFilter == null ? "active" : "")} onClick=${() => setTeamFilter(null)}>Alle</button>
+            ${selectedTeams.map((t) => html`
+              <button
+                key=${t.team + t.bedrift}
+                className=${"subtle " + (teamFilter && teamFilter.team === t.team && teamFilter.bedrift === t.bedrift ? "active" : "")}
+                onClick=${() => setTeamFilter(t)}
+              >${t.team}${t.bedrift ? ` · ${t.bedrift}` : ""} (${t.count})</button>
+            `)}
+          </div>
+        </div>
+      ` : null}
+
+      <div className="grid" style=${{ marginTop: "12px" }}>
+        <div className="stat"><div className="label">Starter</div><div className="value">${stats.starts}</div></div>
+        <div className="stat"><div className="label">Median percentil</div><div className="value">${stats.medianPct != null ? html`<span className=${"percent-pill " + pillClass(stats.medianPct)} style=${{ fontSize: "16px", padding: "2px 10px" }}>${stats.medianPct}%</span>` : "—"}</div></div>
+        <div className="stat"><div className="label">Beste percentil</div><div className="value">${stats.bestPct != null ? html`<span className=${"percent-pill " + pillClass(stats.bestPct)} style=${{ fontSize: "16px", padding: "2px 10px" }}>${stats.bestPct}%</span>` : "—"}</div></div>
+        <div className="stat"><div className="label">Raskeste pace</div><div className="value">${stats.bestPace ? fmtPace(stats.bestPace.split, meta.etappe_distances[stats.bestPace.etappe]) : "—"}</div><div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>${stats.bestPace ? `etappe ${stats.bestPace.etappe} · ${stats.bestPace.year}` : ""}</div></div>
+      </div>
+
+      ${isMobile
+        ? html`
+            <div className="etappe-cards" style=${{ marginTop: "12px" }}>
+              ${selectedRows.map((r) => html`
+                <div className="etappe-card" key=${r.tid + "-" + r.etappe}>
+                  <div className="etappe-card-head">
+                    <div className="etappe-card-num">${r.etappe}</div>
+                    <div className="etappe-card-title">
+                      <div className="etappe-card-name">${ETAPPE_NAMES[r.etappe]}</div>
+                      <div className="etappe-card-runner"><span className=${"chip year-" + r.year}>${r.year}</span> ${r.team}</div>
+                    </div>
+                    <div className="etappe-card-time">
+                      <div className="t">${fmtTime(r.split)}</div>
+                      <div className="p">${fmtPace(r.split, r.dist)}${r.dist ? ` · ${r.dist} m` : ""}</div>
+                    </div>
+                  </div>
+                  <div className="etappe-card-stats">
+                    <div className="s"><div className="lbl">Rang ${r.year}</div><div className="val">${r.rkYear ? `${r.rkYear} / ${r.nYear}` : "—"}</div></div>
+                    <div className="s"><div className="lbl">Pct ${r.year}</div><div className="val">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</div></div>
+                    <div className="s"><div className="lbl">Pct alle år</div><div className="val">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</div></div>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `
+        : html`
+            <table className="etappes-table" style=${{ marginTop: "12px" }}>
+              <thead>
+                <tr>
+                  <th>År</th>
+                  <th>Etappe</th>
+                  <th>Lag</th>
+                  <th className="right">Dist.</th>
+                  <th className="right">Tid</th>
+                  <th className="right">Pace</th>
+                  <th className="right">Rang året</th>
+                  <th className="right">Pct året</th>
+                  <th className="right">Pct alle år</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${selectedRows.map((r) => html`
+                  <tr key=${r.tid + "-" + r.etappe}>
+                    <td><span className=${"chip year-" + r.year}>${r.year}</span></td>
+                    <td>${r.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[r.etappe]}</span></td>
+                    <td className="team-name">${r.team}${r.bedrift ? html` <span style=${{ color: "var(--muted)" }}>· ${r.bedrift}</span>` : null}</td>
+                    <td className="right muted" style=${{ fontSize: "12px" }}>${r.dist ? r.dist + " m" : "—"}</td>
+                    <td className="right">${fmtTime(r.split)}</td>
+                    <td className="right muted" style=${{ fontSize: "12px" }}>${fmtPace(r.split, r.dist)}</td>
+                    <td className="right">${r.rkYear ? `${r.rkYear} / ${r.nYear}` : "—"}</td>
+                    <td className="right">${r.pctYear != null ? html`<span className=${"percent-pill " + pillClass(r.pctYear)}>${r.pctYear}%</span>` : "—"}</td>
+                    <td className="right">${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)}>${r.pctAll}%</span>` : "—"}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          `}
+    </div>
+    ${yearsInUse.length > 0 ? html`
+      <div className="chart-wrap">
+        <h3>Percentil per etappe ${yearsInUse.length > 1 ? "(per år)" : ""}</h3>
+        <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Lavere = bedre. 50% er median løper på etappen (alle år).</div>
+        <${ResponsiveContainer} width="100%" height=${260}>
+          <${LineChart} data=${trendData} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+            <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} type="number" domain=${[1, 15]} ticks=${[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]} />
+            <${YAxis} stroke="#8b949e" fontSize=${12} reversed=${true} domain=${[0, 100]} tickFormatter=${(v) => v + "%"} />
+            <${ReferenceLine} y=${50} stroke="#5e5444" strokeDasharray="2 4" label=${{ value: "median", fill: "#978a72", fontSize: 10, position: "right" }} />
+            <${Tooltip}
+              contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }}
+              formatter=${(v, name) => [v + "%", name]}
+            />
+            <${Legend} />
+            ${yearsInUse.map((y) => html`<${Line} key=${y} type="monotone" dataKey=${`y${y}`} name=${String(y)} stroke=${yearColor(y)} strokeWidth=${2} connectNulls=${true} dot=${{ r: 4 }} />`)}
+          <//>
+        <//>
+      </div>
+    ` : null}
+
+    ${stats.uniqueEtappes < stats.starts ? html`
+      <div className="chart-wrap">
+        <h3>Personlig utvikling per etappe (samme etappe i ulike år)</h3>
+        ${(() => {
+          // Group rows by etappe, only keep etappes run more than once.
+          const byEt = new Map();
+          for (const r of selectedRows) {
+            const arr = byEt.get(r.etappe) || [];
+            arr.push(r);
+            byEt.set(r.etappe, arr);
+          }
+          const repeats = [...byEt.entries()]
+            .filter(([_, arr]) => arr.length > 1)
+            .sort((a, b) => a[0] - b[0]);
+          if (!repeats.length) return html`<div style=${{ color: "var(--muted)", fontSize: "13px" }}>Ingen etappe gjentatt — alt er førstegangsstart.</div>`;
+          return html`
+            <div style=${{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
+              ${repeats.map(([etappe, arr]) => {
+                const sorted = arr.slice().sort((a, b) => a.year - b.year);
+                const first = sorted[0];
+                const last = sorted[sorted.length - 1];
+                const diff = last.split - first.split;
+                const pctDiff = last.pctAll != null && first.pctAll != null ? last.pctAll - first.pctAll : null;
+                return html`
+                  <div key=${etappe} style=${{ border: "1px solid var(--border)", borderRadius: "4px", padding: "10px 12px", background: "var(--bg-2)" }}>
+                    <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "6px" }}>
+                      <strong style=${{ fontSize: "13px" }}>Etappe ${etappe}</strong>
+                      <span style=${{ fontSize: "11px", color: "var(--muted)" }}>${ETAPPE_NAMES[etappe]}</span>
+                    </div>
+                    ${sorted.map((r) => html`
+                      <div key=${r.year} style=${{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: "8px", alignItems: "center", fontSize: "12px", padding: "3px 0" }}>
+                        <span className=${"chip year-" + r.year} style=${{ fontSize: "10px" }}>${r.year}</span>
+                        <span style=${{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${r.team}</span>
+                        <span style=${{ fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>${fmtTime(r.split)}</span>
+                        ${r.pctAll != null ? html`<span className=${"percent-pill " + pillClass(r.pctAll)} style=${{ fontSize: "10px" }}>${r.pctAll}%</span>` : html`<span></span>`}
+                      </div>
+                    `)}
+                    ${sorted.length > 1 ? html`
+                      <div style=${{ marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed var(--border)", fontSize: "11px", color: diff < 0 ? "var(--good)" : diff > 0 ? "var(--bad)" : "var(--muted)", fontFamily: "JetBrains Mono, monospace" }}>
+                        Endring: ${diff > 0 ? "+" : ""}${diff.toFixed(0)}s${pctDiff != null ? ` · pct ${pctDiff > 0 ? "+" : ""}${pctDiff}` : ""}
+                      </div>
+                    ` : null}
+                  </div>
+                `;
+              })}
+            </div>
+          `;
+        })()}
+      </div>
+    ` : null}
+
+    ${compare && headToHead.length ? html`
+      <div className="chart-wrap">
+        <h3>Hode-mot-hode: ${selected.display} vs ${compare.display}</h3>
+        <div style=${{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>Beste tid hver løper har på hver etappe (alle år). Negativ = ${selected.display} raskere.</div>
+        <${ResponsiveContainer} width="100%" height=${280}>
+          <${BarChart} data=${headToHead.map((h) => ({ etappe: h.etappe, mine: h.mine.split, theirs: h.theirs.split, diff: h.diff }))} margin=${{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <${CartesianGrid} stroke="#30363d" strokeDasharray="3 3" />
+            <${XAxis} dataKey="etappe" stroke="#8b949e" fontSize=${12} />
+            <${YAxis} stroke="#8b949e" fontSize=${12} tickFormatter=${(v) => fmtTime(v)} />
+            <${Tooltip} contentStyle=${{ background: "#161b22", border: "1px solid #30363d" }} formatter=${(v) => fmtTime(v)} />
+            <${Legend} />
+            <${Bar} dataKey="mine" name=${selected.display} fill="#f4cf3a" />
+            <${Bar} dataKey="theirs" name=${compare.display} fill="#6cc270" />
+          <//>
+        <//>
+        <table className="etappes-table" style=${{ marginTop: "12px" }}>
+          <thead>
+            <tr>
+              <th>Etappe</th>
+              <th className="right">${selected.display}</th>
+              <th className="right">${compare.display}</th>
+              <th className="right">Diff</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${headToHead.map((h) => html`
+              <tr key=${h.etappe}>
+                <td>${h.etappe}: <span style=${{ color: "var(--muted)", fontSize: "12px" }}>${ETAPPE_NAMES[h.etappe]}</span></td>
+                <td className="right">${fmtTime(h.mine.split)} <span style=${{ color: "var(--muted)", fontSize: "11px" }}>(${h.mine.year})</span></td>
+                <td className="right">${fmtTime(h.theirs.split)} <span style=${{ color: "var(--muted)", fontSize: "11px" }}>(${h.theirs.year})</span></td>
+                <td className="right" style=${{ color: h.diff < 0 ? "var(--good)" : h.diff > 0 ? "var(--bad)" : undefined, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>${h.diff > 0 ? "+" : ""}${h.diff.toFixed(0)}s</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    ` : null}
+  ` : null;
+
+  const emptyState = html`
+    <div style=${{ padding: "32px 20px", color: "var(--muted)", fontSize: "14px", maxWidth: "520px" }}>
+      <div style=${{ fontFamily: "Fraunces, Georgia, serif", fontSize: "20px", color: "var(--text)", marginBottom: "8px" }}>Søk etter en løper</div>
+      <p>Skriv inn et navn i søkefeltet. Cirka halvparten av løperne i datasettet har registrert navn (2022–2026). Vanlige fornavn kan tilhøre flere personer — bruk lag-filter på profilen for å skille.</p>
+      <p style=${{ marginTop: "12px" }}>Når en løper er valgt får du: percentil pr. etappe, utvikling over år, og du kan sammenligne med en annen løper.</p>
+    </div>
+  `;
+
+  return html`
+    <${React.Fragment}>
+      <div className="sidebar" style=${{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div className="field">
+          <label>Søk løper ${pickingCompare ? html`<span style=${{ color: "var(--good)" }}>(velger sammenligning)</span>` : null}</label>
+          <input
+            type="text"
+            placeholder="navn…"
+            value=${q}
+            onInput=${(e) => setQ(e.target.value)}
+            autoFocus=${!selected && !isMobile}
+          />
+          <div style=${{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            ${q.trim() ? `${matches.length.toLocaleString("no")} treff` : `${allRunners.length.toLocaleString("no")} unike navn totalt`}
+          </div>
+        </div>
+        <div style=${{ flex: 1, minHeight: 0, overflow: "auto", marginTop: "4px", border: q.trim() ? "1px solid var(--border)" : "none", borderRadius: "4px" }}>
+          ${!q.trim()
+            ? null
+            : matches.length === 0
+            ? html`<div style=${{ padding: "16px", color: "var(--muted)", fontSize: "13px" }}>Ingen treff.</div>`
+            : matches.map((r) =>
+                matchListItem(
+                  r,
+                  r.key === selectedKey,
+                  r.key === compareKey,
+                  () => {
+                    if (pickingCompare && r.key !== selectedKey) {
+                      setCompareKey(r.key);
+                      setPickingCompare(false);
+                    } else {
+                      setSelectedKey(r.key);
+                    }
+                  },
+                ),
+              )}
+        </div>
+      </div>
+      <div className="content" style=${{ padding: 0, overflow: "auto" }}>
+        ${selected ? profile : emptyState}
+      </div>
+    <//>
+  `;
+}
+
 function App() {
   const [db, setDb] = useState(null);
   const [view, setView] = usePersistedState("hk:view", "teams");
@@ -2990,7 +3496,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Auto-close sidebar when switching tabs on mobile.
   useEffect(() => { if (isMobile) setSidebarOpen(false); }, [view, isMobile]);
-  const hasSidebar = view === "teams" || view === "etappesok" || view === "etapper";
+  const hasSidebar = view === "teams" || view === "etappesok" || view === "etapper" || view === "atlet";
   const toggleCompare = useCallback(
     (tid) =>
       setCompareTids((cur) => (cur.includes(tid) ? cur.filter((t) => t !== tid) : [...cur, tid])),
@@ -3213,6 +3719,8 @@ function App() {
           ? html`<${EtapperView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
           : view === "etappesok"
           ? html`<${EtappeSokView} db=${db} splitsByTid=${splitsByTid} setSelected=${setSelected} setView=${setView} statsAllYears=${statsAllYears} compareTids=${compareTids} toggleCompare=${toggleCompare} etappePreselect=${etappePreselect} clearPreselect=${() => setEtappePreselect(null)} />`
+          : view === "atlet"
+          ? html`<${AthleteView} db=${db} splitsByTid=${splitsByTid} statsAllYears=${statsAllYears} />`
           : view === "rute"
           ? html`<${MapView} db=${db} statsAllYears=${statsAllYears} splitsByTid=${splitsByTid} setView=${setView} setSelected=${setSelected} setEtappePreselect=${setEtappePreselect} />`
           : html`<${CompareView} db=${db} splitsByTid=${splitsByTid} compareTids=${compareTids} toggleCompare=${toggleCompare} clearCompare=${clearCompare} cumIndex=${cumIndex} statsAllYears=${statsAllYears} setSelected=${setSelected} setView=${setView} recentCompares=${recentCompares} restoreCompare=${restoreCompare} removeRecentCompare=${removeRecentCompare} />`}
